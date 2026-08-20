@@ -7,6 +7,7 @@ use App\Models\Rekomendasi;
 use App\Models\Voucher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class VoucherController extends Controller
@@ -29,7 +30,10 @@ class VoucherController extends Controller
 
     /**
      * Terbitkan voucher baru. Kode digenerate di backend, tidak pernah
-     * dipercaya dari input frontend.
+     * dipercaya dari input frontend. Setiap kupon sekali pakai (kuota=1);
+     * parameter "jumlah" mengontrol berapa lembar/kode berbeda dibuat
+     * sekaligus, supaya N salinan cetak = N kode unik, bukan 1 kode
+     * digandakan tampilannya.
      */
     public function store(Request $request)
     {
@@ -42,32 +46,47 @@ class VoucherController extends Controller
             'nilai' => ['required', 'integer', 'min:1'],
             'harga_normal' => ['nullable', 'integer', 'min:0'],
             'min_belanja' => ['nullable', 'integer', 'min:0'],
-            'kuota' => ['required', 'integer', 'min:1'],
+            'jumlah' => ['nullable', 'integer', 'min:1', 'max:50'],
             'berlaku_sampai' => ['required', 'date'],
         ]);
 
         $item = $validated['item_id'] ? Item::find($validated['item_id']) : null;
+        $jumlah = $validated['jumlah'] ?? 1;
 
-        $voucher = Voucher::create([
-            'kode' => $this->generateKodeUnik($item?->nama ?? 'SPC'),
-            'item_id' => $item?->id,
-            'rekomendasi_id' => $validated['rekomendasi_id'] ?? null,
-            'nama_item' => $item?->nama,
-            'kategori_item' => $item?->kategori,
-            'judul' => $validated['judul'],
-            'target' => $validated['target'] ?? null,
-            'diskon_persen' => $validated['tipe'] === 'persen' ? $validated['nilai'] : null,
-            'diskon_nominal' => $validated['tipe'] === 'nominal' ? $validated['nilai'] : null,
-            'harga_normal' => $validated['harga_normal'] ?? null,
-            'min_belanja' => $validated['min_belanja'] ?? 0,
-            'kuota' => $validated['kuota'],
-            'terpakai' => 0,
-            'berlaku_sampai' => $validated['berlaku_sampai'],
-            'status' => 'aktif',
-        ]);
+        $vouchers = DB::transaction(function () use ($validated, $item, $jumlah) {
+            $kodeTerpakaiDiBatch = [];
+            $hasil = [];
+
+            for ($i = 0; $i < $jumlah; $i++) {
+                $kode = $this->generateKodeUnik($item?->nama ?? 'SPC', $kodeTerpakaiDiBatch);
+                $kodeTerpakaiDiBatch[] = $kode;
+
+                $hasil[] = Voucher::create([
+                    'kode' => $kode,
+                    'item_id' => $item?->id,
+                    'rekomendasi_id' => $validated['rekomendasi_id'] ?? null,
+                    'nama_item' => $item?->nama,
+                    'kategori_item' => $item?->kategori,
+                    'judul' => $validated['judul'],
+                    'target' => $validated['target'] ?? null,
+                    'diskon_persen' => $validated['tipe'] === 'persen' ? $validated['nilai'] : null,
+                    'diskon_nominal' => $validated['tipe'] === 'nominal' ? $validated['nilai'] : null,
+                    'harga_normal' => $validated['harga_normal'] ?? null,
+                    'min_belanja' => $validated['min_belanja'] ?? 0,
+                    'kuota' => 1,
+                    'terpakai' => 0,
+                    'berlaku_sampai' => $validated['berlaku_sampai'],
+                    'status' => 'aktif',
+                ]);
+            }
+
+            return $hasil;
+        });
+
+        $loaded = collect($vouchers)->each->load(['item', 'rekomendasi']);
 
         return response()->json([
-            'data' => $voucher->load(['item', 'rekomendasi']),
+            'data' => $loaded,
         ], 201);
     }
 
@@ -174,7 +193,13 @@ class VoucherController extends Controller
         ]);
     }
 
-    private function generateKodeUnik(string $namaSumber): string
+    /**
+     * $kodeTerpakaiDiBatch menampung kode yang baru saja dibuat dalam
+     * batch store() yang sama tapi belum ter-commit ke DB, supaya cetak
+     * N kupon sekaligus tidak menghasilkan kode kembar antar sesama
+     * kupon baru (bukan cuma dicek terhadap yang sudah ada di database).
+     */
+    private function generateKodeUnik(string $namaSumber, array $kodeTerpakaiDiBatch = []): string
     {
         $prefix = Str::upper(Str::limit(preg_replace('/[^a-zA-Z]/', '', $namaSumber), 3, '')) ?: 'SPC';
         $prefix = str_pad($prefix, 3, 'X');
@@ -182,7 +207,7 @@ class VoucherController extends Controller
         do {
             $angka = str_pad((string) random_int(0, 99999), 5, '0', STR_PAD_LEFT);
             $kode = "VCHR-{$prefix}-{$angka}";
-        } while (Voucher::where('kode', $kode)->exists());
+        } while (in_array($kode, $kodeTerpakaiDiBatch, true) || Voucher::where('kode', $kode)->exists());
 
         return $kode;
     }

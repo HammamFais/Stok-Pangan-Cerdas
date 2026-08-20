@@ -93,7 +93,6 @@ const el = {
   voucherInputKadaluarsa: document.getElementById('voucher-input-kadaluarsa'),
   voucherDiskonGroup: document.getElementById('voucher-diskon-group'),
   voucherInputMinBelanja: document.getElementById('voucher-input-min-belanja'),
-  voucherInputKuota: document.getElementById('voucher-input-kuota'),
   voucherInputQty: document.getElementById('voucher-input-qty'),
   voucherInputKode: document.getElementById('voucher-input-kode'),
   btnVoucherGenerateCode: document.getElementById('btn-voucher-generate-code'),
@@ -1225,7 +1224,6 @@ function openVoucherModal(item = null, rekomendasi = null, fromScanner = false) 
     nilai: defaultDiskon,
     minBelanja: 25000,
     kadaluarsa: expDate,
-    kuota: 10,
     qty: 4,
     kode: kode,
     rekomendasiId: rekomendasi ? rekomendasi.id : null,
@@ -1235,7 +1233,6 @@ function openVoucherModal(item = null, rekomendasi = null, fromScanner = false) 
   if (el.voucherInputTarget) el.voucherInputTarget.value = targetName;
   if (el.voucherInputKadaluarsa) el.voucherInputKadaluarsa.value = currentVoucherData.kadaluarsa;
   if (el.voucherInputMinBelanja) el.voucherInputMinBelanja.value = currentVoucherData.minBelanja;
-  if (el.voucherInputKuota) el.voucherInputKuota.value = currentVoucherData.kuota;
   if (el.voucherInputQty) el.voucherInputQty.value = currentVoucherData.qty;
   if (el.voucherInputKode) el.voucherInputKode.value = currentVoucherData.kode;
 
@@ -1271,7 +1268,6 @@ function updateVoucherPreview() {
   }
   currentVoucherData.minBelanja = Math.max(0, Number(el.voucherInputMinBelanja?.value || 0));
   currentVoucherData.kadaluarsa = el.voucherInputKadaluarsa?.value || '2026-08-25';
-  currentVoucherData.kuota = Math.max(1, Number(el.voucherInputKuota?.value || 10));
   currentVoucherData.qty = Number(el.voucherInputQty?.value || 4);
   currentVoucherData.kode = (el.voucherInputKode?.value || 'VCHR-SPC-88219').trim().toUpperCase();
 
@@ -1307,30 +1303,35 @@ async function saveAndPrintVouchers() {
     tipe: currentVoucherData.tipe,
     nilai: currentVoucherData.nilai,
     min_belanja: currentVoucherData.minBelanja,
-    kuota: currentVoucherData.kuota,
+    jumlah: currentVoucherData.qty,
     berlaku_sampai: currentVoucherData.kadaluarsa,
   };
 
-  let voucherTersimpan;
+  // Satu kupon sekali pakai per lembar: backend membuat `jumlah` voucher
+  // terpisah dengan kode unik masing-masing, bukan 1 voucher digandakan
+  // tampilannya.
+  let voucherList;
   try {
-    voucherTersimpan = await createVoucher(payload);
+    voucherList = await createVoucher(payload);
   } catch (err) {
     showToast(err.message || 'Gagal menyimpan voucher ke server.');
     return;
   }
 
+  const voucherPertama = voucherList[0];
+
   // Kode final ditentukan backend, bukan yang di-generate di frontend.
-  currentVoucherData.kode = voucherTersimpan.kode;
-  if (el.voucherInputKode) el.voucherInputKode.value = voucherTersimpan.kode;
-  if (el.voucherPreviewKode) el.voucherPreviewKode.textContent = voucherTersimpan.kode;
+  currentVoucherData.kode = voucherPertama.kode;
+  if (el.voucherInputKode) el.voucherInputKode.value = voucherPertama.kode;
+  if (el.voucherPreviewKode) el.voucherPreviewKode.textContent = voucherPertama.kode;
   if (el.voucherPreviewBarcodeSvg) {
-    const barcodeData = generateBarcodeSvgBars(voucherTersimpan.kode);
+    const barcodeData = generateBarcodeSvgBars(voucherPertama.kode);
     el.voucherPreviewBarcodeSvg.setAttribute('viewBox', `0 0 ${barcodeData.totalWidth} 24`);
     el.voucherPreviewBarcodeSvg.innerHTML = barcodeData.rects;
   }
 
   await renderQuickVouchers();
-  showToast(`Voucher ${voucherTersimpan.kode} berhasil disimpan ke sistem kasir.`);
+  showToast(`${voucherList.length} kupon berhasil disimpan ke sistem kasir.`);
 
   if (currentVoucherData.rekomendasiId) {
     terapkanRekomendasi(currentVoucherData.rekomendasiId).then((updated) => {
@@ -1342,16 +1343,26 @@ async function saveAndPrintVouchers() {
 
   if (!el.voucherTicketPreview || !el.printableVouchersArea) return;
   if (el.printableLabelsArea) el.printableLabelsArea.innerHTML = '';
-  const qty = currentVoucherData.qty;
   const previewHTML = el.voucherTicketPreview.outerHTML;
 
   el.printableVouchersArea.innerHTML = '';
-  for (let i = 0; i < qty; i++) {
+  voucherList.forEach((v) => {
     const itemDiv = document.createElement('div');
     itemDiv.className = 'voucher-print-item';
     itemDiv.innerHTML = previewHTML;
+
+    const kodeEl = itemDiv.querySelector('#voucher-preview-kode');
+    if (kodeEl) kodeEl.textContent = v.kode;
+
+    const barcodeEl = itemDiv.querySelector('#voucher-preview-barcode-svg');
+    if (barcodeEl) {
+      const barcodeData = generateBarcodeSvgBars(v.kode);
+      barcodeEl.setAttribute('viewBox', `0 0 ${barcodeData.totalWidth} 24`);
+      barcodeEl.innerHTML = barcodeData.rects;
+    }
+
     el.printableVouchersArea.appendChild(itemDiv);
-  }
+  });
 
   window.print();
 }
@@ -1557,7 +1568,6 @@ if (el.btnPrintVouchers) el.btnPrintVouchers.addEventListener('click', saveAndPr
 if (el.voucherInputJudul) el.voucherInputJudul.addEventListener('input', updateVoucherPreview);
 if (el.voucherInputMinBelanja) el.voucherInputMinBelanja.addEventListener('input', updateVoucherPreview);
 if (el.voucherInputKadaluarsa) el.voucherInputKadaluarsa.addEventListener('change', updateVoucherPreview);
-if (el.voucherInputKuota) el.voucherInputKuota.addEventListener('input', updateVoucherPreview);
 if (el.voucherInputQty) el.voucherInputQty.addEventListener('change', updateVoucherPreview);
 if (el.voucherInputKode) el.voucherInputKode.addEventListener('input', updateVoucherPreview);
 
