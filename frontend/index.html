@@ -598,6 +598,12 @@
           <!-- Form Pengaturan Voucher (Kiri / 6 Kolom) -->
           <div class="md:col-span-6 flex flex-col gap-2.5 sm:gap-3 text-xs w-full min-w-0">
             <div>
+              <label for="voucher-input-judul" class="form-label text-[11px] sm:text-xs">Judul Kupon</label>
+              <input id="voucher-input-judul" type="text" placeholder="Contoh: Food Rescue Promo"
+                class="input-field text-xs py-1.5 sm:py-2 font-medium w-full" />
+            </div>
+
+            <div>
               <label for="voucher-input-target" class="form-label text-[11px] sm:text-xs">Target Produk / Promo</label>
               <select id="voucher-input-target" class="input-field text-xs py-1.5 sm:py-2 font-medium w-full">
                 <option value="Semua">Semua Kategori (Global)</option>
@@ -624,6 +630,23 @@
                 <label for="voucher-input-kadaluarsa" class="form-label text-[11px] sm:text-xs">Masa Berlaku</label>
                 <input id="voucher-input-kadaluarsa" type="date"
                   class="input-field text-xs py-1.5 w-full" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label for="voucher-input-kuota" class="form-label text-[11px] sm:text-xs">Kuota Klaim</label>
+                <input id="voucher-input-kuota" type="number" min="1" step="1" value="10"
+                  class="input-field font-semibold text-xs py-1.5 w-full" />
+              </div>
+              <div>
+                <label for="voucher-input-qty" class="form-label text-[11px] sm:text-xs">Jumlah Salinan Cetak</label>
+                <select id="voucher-input-qty" class="input-field text-xs py-1.5 w-full">
+                  <option value="1">1 Kupon</option>
+                  <option value="2">2 Kupon</option>
+                  <option value="4" selected>4 Kupon (1 Lembar)</option>
+                  <option value="6">6 Kupon</option>
+                </select>
               </div>
             </div>
 
@@ -753,6 +776,24 @@
       <div class="p-3 sm:p-4 overflow-y-auto min-h-0 flex-1 overscroll-contain flex flex-col gap-3 text-xs">
         <!-- Input Kode Barcode & Total Belanja -->
         <div class="flex flex-col gap-2.5">
+          <div>
+            <button type="button" id="btn-scan-camera"
+              class="btn btn-outline h-8 sm:h-9 px-3 text-xs font-semibold w-full flex items-center justify-center gap-1.5 mb-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              <span>Scan dengan Kamera</span>
+            </button>
+            <div id="scan-camera-wrap" class="hidden mb-2 rounded-xl overflow-hidden border border-subtle relative">
+              <video id="scan-camera-video" class="w-full h-40 sm:h-48 object-cover bg-black" playsinline muted autoplay></video>
+              <button type="button" id="btn-scan-camera-close"
+                class="absolute top-1.5 right-1.5 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs">
+                &times;
+              </button>
+              <p id="scan-camera-status" class="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-white bg-black/50 rounded px-1.5 py-0.5 text-center"></p>
+            </div>
+          </div>
           <div>
             <label for="scan-input-kode" class="form-label text-[11px] sm:text-xs">Kode Barcode Voucher</label>
             <div class="flex gap-1.5 items-center w-full">

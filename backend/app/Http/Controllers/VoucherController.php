@@ -146,17 +146,25 @@ class VoucherController extends Controller
         }
         $voucher->save();
 
-        $namaBarang = $voucher->item?->nama ?? $voucher->nama_item ?? $voucher->judul;
-        $jumlahStok = $voucher->item?->jumlah_stok ?? 1;
+        $namaBarang = $voucher->item?->nama ?? $voucher->nama_item ?? $voucher->target ?? $voucher->judul;
 
         Rekomendasi::create([
             'item_id' => $voucher->item_id,
-            'nama_item' => $voucher->nama_item ?? $voucher->item?->nama,
+            // Voucher kategori (item_id null) tidak punya nama_item snapshot,
+            // jadi pakai target/judul kupon supaya Riwayat tidak jatuh ke
+            // fallback "(barang dihapus)" milik getNamaBarangAttribute().
+            'nama_item' => $voucher->nama_item ?? $voucher->item?->nama ?? $voucher->target ?? $voucher->judul,
             'kategori_item' => $voucher->kategori_item ?? $voucher->item?->kategori,
             'jenis_saran' => 'Diskon',
             'isi_saran' => "Voucher \"{$voucher->kode}\" ({$voucher->judul}) diklaim di kasir untuk {$namaBarang}.",
             'status_item_saat_dibuat' => $voucher->item?->status ?? 'berisiko',
-            'jumlah_stok_saat_dibuat' => $jumlahStok,
+            // Sengaja 0, BUKAN bug: sistem kasir hanya memvalidasi kode,
+            // tidak mencatat kuantitas transaksi. jumlah_stok item adalah
+            // sisa stok gudang, bukan jumlah yang dibeli, jadi tidak valid
+            // dipakai sebagai unit terselamatkan. Klaim tetap tercatat
+            // sebagai tindakan (jumlah_tindakan, per_jenis) tapi sengaja
+            // tidak menyumbang ke unit_terselamatkan.
+            'jumlah_stok_saat_dibuat' => 0,
             'diterapkan' => true,
             'diterapkan_at' => now(),
         ]);

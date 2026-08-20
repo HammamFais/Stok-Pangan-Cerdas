@@ -116,6 +116,11 @@ const el = {
   btnMobileScanVoucher: document.getElementById('btn-mobile-scan-voucher'),
   scanResultContainer: document.getElementById('scan-result-container'),
   printableVouchersArea: document.getElementById('printable-vouchers-area'),
+  btnScanCamera: document.getElementById('btn-scan-camera'),
+  btnScanCameraClose: document.getElementById('btn-scan-camera-close'),
+  scanCameraWrap: document.getElementById('scan-camera-wrap'),
+  scanCameraVideo: document.getElementById('scan-camera-video'),
+  scanCameraStatus: document.getElementById('scan-camera-status'),
 };
 
 function esc(value) {
@@ -1134,59 +1139,6 @@ function generateBarcodeSvgBars(text) {
   return { totalWidth: bitString.length, rects };
 }
 
-const DEFAULT_VOUCHERS = [
-  {
-    kode: 'VCHR-KEJ-88219',
-    judul: 'Food Rescue Deal - Keju Slice',
-    target: 'Olahan Susu',
-    tipe: 'persen',
-    nilai: 50,
-    minBelanja: 25000,
-    kadaluarsa: '2026-08-25',
-    kuota: 10,
-    terpakai: 2,
-    status: 'aktif'
-  },
-  {
-    kode: 'VCHR-BAY-77102',
-    judul: 'Flash Sale Sore - Bayam Segar',
-    target: 'Sayur',
-    tipe: 'persen',
-    nilai: 70,
-    minBelanja: 20000,
-    kadaluarsa: '2026-08-22',
-    kuota: 15,
-    terpakai: 5,
-    status: 'aktif'
-  },
-  {
-    kode: 'VCHR-HEMAT-10K',
-    judul: 'Kupon Penyelamatan Pangan Koperasi',
-    target: 'Semua Kategori',
-    tipe: 'nominal',
-    nilai: 10000,
-    minBelanja: 40000,
-    kadaluarsa: '2026-08-30',
-    kuota: 20,
-    terpakai: 8,
-    status: 'aktif'
-  }
-];
-
-function getVouchers() {
-  try {
-    const saved = localStorage.getItem('spc_vouchers');
-    if (saved) return JSON.parse(saved);
-  } catch (e) {}
-  return DEFAULT_VOUCHERS;
-}
-
-function saveVouchers(list) {
-  try {
-    localStorage.setItem('spc_vouchers', JSON.stringify(list));
-  } catch (e) {}
-}
-
 function generateVoucherCode(targetName = 'SPC') {
   const prefix = targetName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'SPC';
   const randNum = Math.floor(10000 + Math.random() * 90000);
@@ -1344,30 +1296,41 @@ function updateVoucherPreview() {
   }
 }
 
-function saveAndPrintVouchers() {
-  const vouchers = getVouchers();
-  const existingIdx = vouchers.findIndex((v) => v.kode === currentVoucherData.kode);
-  const newVoucherRecord = {
-    kode: currentVoucherData.kode,
+async function saveAndPrintVouchers() {
+  const itemTarget = allItems.find((i) => i.nama === currentVoucherData.target || `${currentVoucherData.target}`.startsWith(i.nama));
+
+  const payload = {
+    item_id: itemTarget ? itemTarget.id : null,
+    rekomendasi_id: currentVoucherData.rekomendasiId || null,
     judul: currentVoucherData.judul,
     target: currentVoucherData.target,
     tipe: currentVoucherData.tipe,
     nilai: currentVoucherData.nilai,
-    minBelanja: currentVoucherData.minBelanja,
-    kadaluarsa: currentVoucherData.kadaluarsa,
+    min_belanja: currentVoucherData.minBelanja,
     kuota: currentVoucherData.kuota,
-    terpakai: 0,
-    status: 'aktif'
+    berlaku_sampai: currentVoucherData.kadaluarsa,
   };
 
-  if (existingIdx >= 0) {
-    vouchers[existingIdx] = newVoucherRecord;
-  } else {
-    vouchers.unshift(newVoucherRecord);
+  let voucherTersimpan;
+  try {
+    voucherTersimpan = await createVoucher(payload);
+  } catch (err) {
+    showToast(err.message || 'Gagal menyimpan voucher ke server.');
+    return;
   }
-  saveVouchers(vouchers);
-  renderQuickVouchers();
-  showToast(`Voucher ${currentVoucherData.kode} berhasil disimpan ke sistem kasir.`);
+
+  // Kode final ditentukan backend, bukan yang di-generate di frontend.
+  currentVoucherData.kode = voucherTersimpan.kode;
+  if (el.voucherInputKode) el.voucherInputKode.value = voucherTersimpan.kode;
+  if (el.voucherPreviewKode) el.voucherPreviewKode.textContent = voucherTersimpan.kode;
+  if (el.voucherPreviewBarcodeSvg) {
+    const barcodeData = generateBarcodeSvgBars(voucherTersimpan.kode);
+    el.voucherPreviewBarcodeSvg.setAttribute('viewBox', `0 0 ${barcodeData.totalWidth} 24`);
+    el.voucherPreviewBarcodeSvg.innerHTML = barcodeData.rects;
+  }
+
+  await renderQuickVouchers();
+  showToast(`Voucher ${voucherTersimpan.kode} berhasil disimpan ke sistem kasir.`);
 
   if (currentVoucherData.rekomendasiId) {
     terapkanRekomendasi(currentVoucherData.rekomendasiId).then((updated) => {
@@ -1420,11 +1383,20 @@ function openScanVoucherModal() {
 
 function closeScanVoucherModal() {
   if (el.modalScanVoucher) el.modalScanVoucher.classList.add('hidden');
+  stopScanCamera();
 }
 
-function renderQuickVouchers() {
+async function renderQuickVouchers() {
   if (!el.scanQuickVouchers) return;
-  const vouchers = getVouchers().filter((v) => v.status === 'aktif' && v.terpakai < v.kuota);
+
+  let vouchers = [];
+  try {
+    vouchers = await fetchVouchers({ status: 'aktif' });
+  } catch (err) {
+    el.scanQuickVouchers.innerHTML = '<span class="text-gray-400 text-xs italic">Gagal memuat voucher dari server.</span>';
+    return;
+  }
+  vouchers = vouchers.filter((v) => v.terpakai < v.kuota);
   el.scanQuickVouchers.innerHTML = '';
 
   if (vouchers.length === 0) {
@@ -1446,7 +1418,7 @@ function renderQuickVouchers() {
   });
 }
 
-function doValidateVoucher() {
+async function doValidateVoucher() {
   const kode = (el.scanInputKode?.value || '').trim().toUpperCase();
   const totalBelanja = Number(el.scanInputBelanja?.value || 0);
 
@@ -1455,50 +1427,57 @@ function doValidateVoucher() {
     return;
   }
 
-  const vouchers = getVouchers();
-  const voucher = vouchers.find((v) => v.kode === kode);
+  let voucher;
+  try {
+    voucher = await validasiVoucher(kode);
+  } catch (err) {
+    const pesan = err.message || 'Voucher tidak dapat divalidasi.';
+    const belumKadaluarsa = !pesan.toLowerCase().includes('kadaluarsa') && !pesan.toLowerCase().includes('berlaku');
+    const isNotFound = pesan.toLowerCase().includes('tidak ditemukan');
+    const isKuotaHabis = pesan.toLowerCase().includes('kuota');
 
-  if (!voucher) {
-    el.scanResultContainer.innerHTML = `
-      <div class="w-full p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex flex-col items-center">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
-        <strong class="font-bold text-xs">Voucher Tidak Ditemukan!</strong>
-        <span class="text-[11px] mt-0.5">Kode "${esc(kode)}" tidak terdaftar di database server.</span>
-      </div>
-    `;
+    if (isNotFound) {
+      el.scanResultContainer.innerHTML = `
+        <div class="w-full p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex flex-col items-center">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+          <strong class="font-bold text-xs">Voucher Tidak Ditemukan!</strong>
+          <span class="text-[11px] mt-0.5">Kode "${esc(kode)}" tidak terdaftar di database server.</span>
+        </div>
+      `;
+    } else if (isKuotaHabis) {
+      el.scanResultContainer.innerHTML = `
+        <div class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 flex flex-col items-center">
+          <strong class="font-bold text-xs">Kuota Kupon Habis!</strong>
+          <span class="text-[11px] mt-0.5">${esc(pesan)}</span>
+        </div>
+      `;
+    } else if (!belumKadaluarsa) {
+      el.scanResultContainer.innerHTML = `
+        <div class="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 flex flex-col items-center">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          <strong class="font-bold text-xs">Kupon Telah Kadaluarsa!</strong>
+          <span class="text-[11px] mt-0.5">${esc(pesan)}</span>
+        </div>
+      `;
+    } else {
+      el.scanResultContainer.innerHTML = `
+        <div class="w-full p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex flex-col items-center">
+          <strong class="font-bold text-xs">Voucher Tidak Valid</strong>
+          <span class="text-[11px] mt-0.5">${esc(pesan)}</span>
+        </div>
+      `;
+    }
     return;
   }
 
-  const now = new Date().toISOString().slice(0, 10);
-  if (voucher.kadaluarsa < now) {
-    el.scanResultContainer.innerHTML = `
-      <div class="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 flex flex-col items-center">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-        <strong class="font-bold text-xs">Kupon Telah Kadaluarsa!</strong>
-        <span class="text-[11px] mt-0.5">Kupon ini habis masa berlakunya pada ${formatTanggal(voucher.kadaluarsa)}.</span>
-      </div>
-    `;
-    return;
-  }
-
-  if (voucher.terpakai >= voucher.kuota) {
-    el.scanResultContainer.innerHTML = `
-      <div class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 flex flex-col items-center">
-        <strong class="font-bold text-xs">Kuota Kupon Habis!</strong>
-        <span class="text-[11px] mt-0.5">Kupon ini telah digunakan maksimal (${voucher.kuota}/${voucher.kuota}).</span>
-      </div>
-    `;
-    return;
-  }
-
-  if (totalBelanja < voucher.minBelanja) {
-    const kurang = voucher.minBelanja - totalBelanja;
+  if (totalBelanja < voucher.min_belanja) {
+    const kurang = voucher.min_belanja - totalBelanja;
     el.scanResultContainer.innerHTML = `
       <div class="w-full p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-left">
         <div class="flex items-center gap-1.5 font-bold text-xs">
           <span>⚠️ Belum Memenuhi Minimal Belanja</span>
         </div>
-        <div class="text-[11px] mt-1">Minimal belanja: <strong>${formatRupiah(voucher.minBelanja)}</strong>. Kurang <strong>${formatRupiah(kurang)}</strong> untuk menggunakan kupon ini.</div>
+        <div class="text-[11px] mt-1">Minimal belanja: <strong>${formatRupiah(voucher.min_belanja)}</strong>. Kurang <strong>${formatRupiah(kurang)}</strong> untuk menggunakan kupon ini.</div>
       </div>
     `;
     return;
@@ -1528,7 +1507,7 @@ function doValidateVoucher() {
       <!-- Nama Kupon / Promo Lengkap -->
       <div>
         <h4 class="font-heading font-bold text-[13px] sm:text-sm text-gray-900 leading-snug break-words">${esc(voucher.judul)}</h4>
-        <p class="text-[10.5px] text-gray-500 mt-0.5">Target: ${esc(voucher.target)} · Sisa kuota: <strong>${voucher.kuota - voucher.terpakai}</strong></p>
+        <p class="text-[10.5px] text-gray-500 mt-0.5">Target: ${esc(voucher.target || 'Semua Kategori')} · Sisa kuota: <strong>${voucher.sisa_kuota}</strong></p>
       </div>
 
       <!-- Rincian Biaya Kasir -->
@@ -1555,11 +1534,17 @@ function doValidateVoucher() {
     </div>
   `;
 
-  document.getElementById('btn-redeem-voucher')?.addEventListener('click', () => {
-    voucher.terpakai += 1;
-    saveVouchers(vouchers);
-    showToast(`Kupon ${voucher.kode} berhasil diklaim. Sisa kuota: ${voucher.kuota - voucher.terpakai}`);
-    doValidateVoucher();
+  document.getElementById('btn-redeem-voucher')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const updated = await klaimVoucher(voucher.id);
+      showToast(`Kupon ${updated.kode} berhasil diklaim. Sisa kuota: ${updated.sisa_kuota}`);
+      await doValidateVoucher();
+    } catch (err) {
+      showToast(err.message || 'Gagal mengklaim voucher.');
+      btn.disabled = false;
+    }
   });
 }
 
@@ -1623,6 +1608,86 @@ if (el.voucherInputTarget) {
   });
 }
 
+// ---------- Scan Barcode Voucher via Kamera ----------
+
+let scanCameraStream = null;
+let scanCameraRafId = null;
+let scanBarcodeDetector = null;
+
+function isBarcodeDetectorSupported() {
+  return typeof window.BarcodeDetector !== 'undefined';
+}
+
+async function startScanCamera() {
+  if (!el.scanCameraWrap || !el.scanCameraVideo) return;
+
+  if (!isBarcodeDetectorSupported()) {
+    if (el.scanCameraStatus) {
+      el.scanCameraStatus.textContent = 'Browser tidak mendukung, silakan ketik manual.';
+    }
+    el.scanCameraWrap.classList.remove('hidden');
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    if (el.scanCameraStatus) {
+      el.scanCameraStatus.textContent = 'Kamera tidak tersedia di perangkat ini.';
+    }
+    el.scanCameraWrap.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    scanCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+    });
+  } catch (err) {
+    showToast('Tidak bisa mengakses kamera. Periksa izin browser.');
+    return;
+  }
+
+  el.scanCameraVideo.srcObject = scanCameraStream;
+  el.scanCameraWrap.classList.remove('hidden');
+  if (el.scanCameraStatus) el.scanCameraStatus.textContent = 'Arahkan kamera ke barcode voucher...';
+
+  try {
+    scanBarcodeDetector = new BarcodeDetector({ formats: ['code_39', 'code_128', 'ean_13', 'qr_code'] });
+  } catch (err) {
+    scanBarcodeDetector = new BarcodeDetector();
+  }
+
+  const detectLoop = async () => {
+    if (!scanCameraStream || !el.scanCameraVideo) return;
+    try {
+      const barcodes = await scanBarcodeDetector.detect(el.scanCameraVideo);
+      if (barcodes.length > 0) {
+        const kode = barcodes[0].rawValue;
+        if (el.scanInputKode) el.scanInputKode.value = kode.trim().toUpperCase();
+        stopScanCamera();
+        doValidateVoucher();
+        return;
+      }
+    } catch (err) {
+      // Frame belum siap / tidak terbaca — abaikan, coba lagi di frame berikutnya.
+    }
+    scanCameraRafId = requestAnimationFrame(detectLoop);
+  };
+  scanCameraRafId = requestAnimationFrame(detectLoop);
+}
+
+function stopScanCamera() {
+  if (scanCameraRafId) {
+    cancelAnimationFrame(scanCameraRafId);
+    scanCameraRafId = null;
+  }
+  if (scanCameraStream) {
+    scanCameraStream.getTracks().forEach((track) => track.stop());
+    scanCameraStream = null;
+  }
+  if (el.scanCameraVideo) el.scanCameraVideo.srcObject = null;
+  if (el.scanCameraWrap) el.scanCameraWrap.classList.add('hidden');
+}
+
 // Event Listeners for Scanner Kasir Modal
 if (el.btnNavScanVoucher) el.btnNavScanVoucher.addEventListener('click', openScanVoucherModal);
 if (el.btnMobileScanVoucher) el.btnMobileScanVoucher.addEventListener('click', openScanVoucherModal);
@@ -1636,6 +1701,8 @@ if (el.scanInputKode) {
     if (e.key === 'Enter') doValidateVoucher();
   });
 }
+if (el.btnScanCamera) el.btnScanCamera.addEventListener('click', startScanCamera);
+if (el.btnScanCameraClose) el.btnScanCameraClose.addEventListener('click', stopScanCamera);
 
 // Tutup modal dengan tombol Escape.
 document.addEventListener('keydown', (e) => {
