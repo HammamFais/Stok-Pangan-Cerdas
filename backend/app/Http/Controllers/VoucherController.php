@@ -50,7 +50,6 @@ class VoucherController extends Controller
             'berlaku_sampai' => ['required', 'date'],
         ]);
 
-<<<<<<< HEAD
         $item = ! empty($validated['item_id']) ? Item::find($validated['item_id']) : null;
         $jumlah = $validated['jumlah'] ?? 1;
 
@@ -62,12 +61,6 @@ class VoucherController extends Controller
         $minBelanja = $untukTargetSpesifik ? 0 : ($validated['min_belanja'] ?? 0);
 
         $vouchers = DB::transaction(function () use ($validated, $item, $jumlah, $minBelanja) {
-=======
-        $item = $validated['item_id'] ? Item::find($validated['item_id']) : null;
-        $jumlah = $validated['jumlah'] ?? 1;
-
-        $vouchers = DB::transaction(function () use ($validated, $item, $jumlah) {
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
             $kodeTerpakaiDiBatch = [];
             $hasil = [];
 
@@ -86,11 +79,7 @@ class VoucherController extends Controller
                     'diskon_persen' => $validated['tipe'] === 'persen' ? $validated['nilai'] : null,
                     'diskon_nominal' => $validated['tipe'] === 'nominal' ? $validated['nilai'] : null,
                     'harga_normal' => $validated['harga_normal'] ?? null,
-<<<<<<< HEAD
                     'min_belanja' => $minBelanja,
-=======
-                    'min_belanja' => $validated['min_belanja'] ?? 0,
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
                     'kuota' => 1,
                     'terpakai' => 0,
                     'berlaku_sampai' => $validated['berlaku_sampai'],
@@ -117,10 +106,7 @@ class VoucherController extends Controller
     {
         $validated = $request->validate([
             'kode' => ['required', 'string'],
-<<<<<<< HEAD
             'total_belanja' => ['nullable', 'integer', 'min:0'],
-=======
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
         ]);
 
         $kode = strtoupper(trim($validated['kode']));
@@ -150,7 +136,6 @@ class VoucherController extends Controller
             ], 422);
         }
 
-<<<<<<< HEAD
         $pesanMinBelanja = $this->cekMinBelanja($voucher, $validated['total_belanja'] ?? null);
         if ($pesanMinBelanja) {
             return response()->json([
@@ -158,8 +143,6 @@ class VoucherController extends Controller
             ], 422);
         }
 
-=======
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
         return response()->json([
             'data' => $voucher->load(['item', 'rekomendasi']),
         ]);
@@ -171,17 +154,12 @@ class VoucherController extends Controller
      * Klaim yang berhasil dicatat ke Riwayat sebagai tindakan "Diskon" yang
      * sudah diterapkan, supaya statistik penyelamatan ikut bergerak.
      */
-<<<<<<< HEAD
     public function klaim(Request $request, Voucher $voucher)
     {
         $validated = $request->validate([
             'total_belanja' => ['nullable', 'integer', 'min:0'],
         ]);
 
-=======
-    public function klaim(Voucher $voucher)
-    {
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
         if ($voucher->status !== 'aktif') {
             return response()->json([
                 'message' => "Voucher ini berstatus \"{$voucher->status}\", tidak bisa diklaim.",
@@ -200,7 +178,6 @@ class VoucherController extends Controller
             ], 422);
         }
 
-<<<<<<< HEAD
         // Re-validasi min_belanja di sini juga -- endpoint validasi() sudah
         // memeriksanya, tapi klaim tidak boleh percaya frontend memanggil
         // validasi() lebih dulu atau mengirim nilai yang sama.
@@ -211,8 +188,6 @@ class VoucherController extends Controller
             ], 422);
         }
 
-=======
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
         $voucher->terpakai += 1;
         if ($voucher->terpakai >= $voucher->kuota) {
             $voucher->status = 'habis';
@@ -229,11 +204,8 @@ class VoucherController extends Controller
             'nama_item' => $voucher->nama_item ?? $voucher->item?->nama ?? $voucher->target ?? $voucher->judul,
             'kategori_item' => $voucher->kategori_item ?? $voucher->item?->kategori,
             'jenis_saran' => 'Diskon',
-<<<<<<< HEAD
             'sumber' => 'kasir',
             'kode_voucher' => $voucher->kode,
-=======
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
             'isi_saran' => "Voucher \"{$voucher->kode}\" ({$voucher->judul}) diklaim di kasir untuk {$namaBarang}.",
             'status_item_saat_dibuat' => $voucher->item?->status ?? 'berisiko',
             // Sengaja 0, BUKAN bug: sistem kasir hanya memvalidasi kode,
@@ -253,7 +225,6 @@ class VoucherController extends Controller
     }
 
     /**
-<<<<<<< HEAD
      * Null kalau syarat belanja minimum terpenuhi (atau tidak ada syarat),
      * atau pesan penolakan yang menyebut kedua angka (total belanja yang
      * dimasukkan vs minimal yang disyaratkan) kalau tidak.
@@ -276,8 +247,6 @@ class VoucherController extends Controller
     }
 
     /**
-=======
->>>>>>> 2a98e5ee7bff082376f7021d0ee8e92c14b4f117
      * $kodeTerpakaiDiBatch menampung kode yang baru saja dibuat dalam
      * batch store() yang sama tapi belum ter-commit ke DB, supaya cetak
      * N kupon sekaligus tidak menghasilkan kode kembar antar sesama
