@@ -1,6 +1,6 @@
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000/api'
-  : 'https://REPLACE_WITH_RAILWAY_URL/api';
+  : 'https://stok-pangan-cerdas-production-1606.up.railway.app/api';
 
 const TOKEN_KEY = 'spc_token';
 
@@ -73,6 +73,12 @@ function fetchMe() {
   return apiRequest('/me');
 }
 
+// ---------- Ringkasan Publik (halaman login, tanpa token) ----------
+
+function fetchRingkasanPublik() {
+  return apiRequest('/ringkasan-publik');
+}
+
 // ---------- Items ----------
 
 async function fetchItems(filters = {}) {
@@ -118,4 +124,31 @@ function fetchRiwayat() {
 
 function fetchStatistikRiwayat() {
   return apiRequest('/riwayat/statistik');
+}
+
+// ---------- Vouchers ----------
+
+function fetchVouchers(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  const query = params.toString();
+  return apiRequest(`/vouchers${query ? `?${query}` : ''}`);
+}
+
+function createVoucher(payload) {
+  return apiRequest('/vouchers', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+function validasiVoucher(kode, totalBelanja = null) {
+  return apiRequest('/vouchers/validasi', {
+    method: 'POST',
+    body: JSON.stringify({ kode, total_belanja: totalBelanja }),
+  });
+}
+
+function klaimVoucher(voucherId, totalBelanja = null) {
+  return apiRequest(`/vouchers/${voucherId}/klaim`, {
+    method: 'POST',
+    body: JSON.stringify({ total_belanja: totalBelanja }),
+  });
 }
