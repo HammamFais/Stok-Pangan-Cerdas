@@ -32,3 +32,8 @@ CLAUDE.md
 
 # Design reference (local only, not for repo)
 design-reference/
+
+# Prompt awal multi-sesi (local only, not for repo)
+PROMPT_AWAL_CHAT_A.md
+PROMPT_AWAL_CHAT_B.md
+PROMPT_AWAL_CHAT_C.md
