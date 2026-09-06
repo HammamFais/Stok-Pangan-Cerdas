@@ -1,28 +1,6 @@
+// Pastikan user sudah login
 if (!getToken()) {
   window.location.href = 'login.html';
-}
-
-const JENIS_WARNA = {
-  Diskon: { fg: '#92400e', bg: '#fffbeb', bd: '#fde68a' },
-  Distribusi: { fg: '#166534', bg: '#f0fdf4', bd: '#bbf7d0' },
-  Bundling: { fg: '#86198f', bg: '#fdf4ff', bd: '#f5d0fe' },
-  Pemusnahan: { fg: '#9f1239', bg: '#fff1f3', bd: '#fecdd3' },
-};
-const JENIS_WARNA_DEFAULT = { fg: '#5d6f63', bg: '#fafbf9', bd: '#e0e7e0' };
-
-function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[char]));
-}
-
-function jenisBadgeStyle(jenis) {
-  const w = JENIS_WARNA[jenis] || JENIS_WARNA_DEFAULT;
-  return `display:inline-flex;align-items:center;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;color:${w.fg};background:${w.bg};border:1px solid ${w.bd}`;
 }
 
 function formatTanggalWaktu(dateString) {
@@ -45,11 +23,279 @@ const el = {
   statBuang: document.getElementById('stat-buang'),
   statBuangUnit: document.getElementById('stat-buang-unit'),
   statPersen: document.getElementById('stat-persen'),
-  perJenisWrap: document.getElementById('per-jenis-wrap'),
+  chartPenyelamatan: document.getElementById('chart-penyelamatan'),
+  chartPenyelamatanPct: document.getElementById('chart-penyelamatan-pct'),
+  legendSelamat: document.getElementById('legend-selamat'),
+  legendBuang: document.getElementById('legend-buang'),
+  chartTren: document.getElementById('chart-tren'),
   perJenisChips: document.getElementById('per-jenis-chips'),
+  riwayatSearch: document.getElementById('riwayat-search'),
+  riwayatFilterTabs: document.getElementById('riwayat-filter-tabs'),
   userName: document.getElementById('user-name'),
   btnLogout: document.getElementById('btn-logout'),
 };
+
+let cachedStatistik = null;
+let cachedRiwayat = [];
+let activeDampakFilter = 'semua';
+let searchKeyword = '';
+
+const JENIS_TERSELAMATKAN = ['Diskon', 'Distribusi', 'Bundling', 'Olah Kembali'];
+
+function aggregateTrendData(riwayatList) {
+  if (!riwayatList || riwayatList.length === 0) {
+    return { labels: [], dataSelamat: [], totalUnitSelamat: 0 };
+  }
+
+  // Sort kronologis berdasarkan diterapkan_at
+  const sorted = [...riwayatList].sort((a, b) => new Date(a.diterapkan_at) - new Date(b.diterapkan_at));
+
+  const dateMap = {};
+  sorted.forEach((r) => {
+    const d = new Date(r.diterapkan_at);
+    const dateKey = `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][d.getMonth()]}`;
+
+    if (!dateMap[dateKey]) {
+      dateMap[dateKey] = { label: dateKey, unitSelamat: 0, count: 0 };
+    }
+
+    const stok = Number(r.jumlah_stok_saat_dibuat ?? r.item?.jumlah_stok ?? 0);
+    if (JENIS_TERSELAMATKAN.includes(r.jenis_saran)) {
+      dateMap[dateKey].unitSelamat += stok;
+    }
+    dateMap[dateKey].count += 1;
+  });
+
+  const labels = Object.keys(dateMap);
+  const dataSelamat = labels.map((k) => dateMap[k].unitSelamat);
+
+  return { labels, dataSelamat };
+}
+
+function renderCharts(statistik, riwayatList = cachedRiwayat) {
+  cachedStatistik = statistik;
+  if (riwayatList && riwayatList.length > 0) {
+    cachedRiwayat = riwayatList;
+  }
+
+  const unitSelamat = Number(statistik.unit_terselamatkan || 0);
+  const unitBuang = Number(statistik.unit_terbuang || 0);
+  const totalUnit = unitSelamat + unitBuang;
+  const persenPenyelamatan = totalUnit > 0
+    ? Math.round((unitSelamat / totalUnit) * 100)
+    : (statistik.jumlah_tindakan > 0 ? Math.round((statistik.jumlah_terselamatkan / statistik.jumlah_tindakan) * 100) : 0);
+
+  if (el.chartPenyelamatanPct) {
+    el.chartPenyelamatanPct.textContent = `${persenPenyelamatan}%`;
+  }
+  if (el.legendSelamat) {
+    el.legendSelamat.textContent = `${unitSelamat} unit`;
+  }
+  if (el.legendBuang) {
+    el.legendBuang.textContent = `${unitBuang} unit`;
+  }
+
+  // 1. Doughnut Chart: Rasio Penyelamatan vs Pembuangan
+  // 2. Line Chart: Tren Penyelamatan Pangan per Hari
+  requestAnimationFrame(() => {
+    if (el.chartPenyelamatan) {
+      drawDonutChart(el.chartPenyelamatan, unitSelamat, unitBuang);
+    }
+    if (el.chartTren) {
+      const trendData = aggregateTrendData(cachedRiwayat);
+      drawLineChart(el.chartTren, trendData);
+    }
+  });
+}
+
+function drawDonutChart(canvas, unitSelamat, unitBuang) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width > 0 ? rect.width : 200;
+  const height = rect.height > 0 ? rect.height : 200;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = Math.min(width, height) / 2 - 10;
+  const innerRadius = radius * 0.72;
+  const total = unitSelamat + unitBuang;
+
+  ctx.clearRect(0, 0, width, height);
+
+  if (total === 0) {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, innerRadius, 2 * Math.PI, 0, true);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fill();
+    return;
+  }
+
+  const selamatAngle = (unitSelamat / total) * 2 * Math.PI;
+  const startAngle = -Math.PI / 2;
+
+  // Selamat arc (Emerald green)
+  if (unitSelamat > 0) {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, startAngle, startAngle + selamatAngle);
+    ctx.arc(centerX, centerY, innerRadius, startAngle + selamatAngle, startAngle, true);
+    ctx.fillStyle = '#10b981';
+    ctx.fill();
+  }
+
+  // Buang arc (Rose red)
+  if (unitBuang > 0) {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, startAngle + selamatAngle, startAngle + 2 * Math.PI);
+    ctx.arc(centerX, centerY, innerRadius, startAngle + 2 * Math.PI, startAngle + selamatAngle, true);
+    ctx.fillStyle = '#f43f5e';
+    ctx.fill();
+  }
+}
+
+function drawLineChart(canvas, trendData) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width > 0 ? rect.width : 340;
+  const height = rect.height > 0 ? rect.height : 200;
+  const paddingLeft = 38;
+  const paddingRight = 32;
+  const paddingBottom = 30;
+  const paddingTop = 26;
+  const plotWidth = width - paddingLeft - paddingRight;
+  const plotHeight = height - paddingBottom - paddingTop;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+
+  const labels = trendData.labels || [];
+  const data = trendData.dataSelamat || [];
+
+  if (labels.length === 0) {
+    ctx.fillStyle = '#8a9a8f';
+    ctx.font = "13px 'DM Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText('Belum ada riwayat tindakan diterapkan', width / 2, height / 2);
+    return;
+  }
+
+  const maxVal = Math.max(...data, 10);
+
+  // 1. Grid lines horizontal (dashed)
+  const gridSteps = 3;
+  ctx.strokeStyle = '#eef2ed';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+
+  for (let i = 0; i <= gridSteps; i++) {
+    const yVal = Math.round((maxVal / gridSteps) * i);
+    const yPos = height - paddingBottom - (yVal / maxVal) * plotHeight;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, yPos);
+    ctx.lineTo(width - paddingRight, yPos);
+    ctx.stroke();
+
+    // Y Axis label
+    ctx.fillStyle = '#8a9a8f';
+    ctx.font = "10.5px 'DM Sans', sans-serif";
+    ctx.textAlign = 'right';
+    ctx.setLineDash([]);
+    ctx.fillText(`${yVal}`, paddingLeft - 8, yPos + 3.5);
+    ctx.setLineDash([3, 3]);
+  }
+  ctx.setLineDash([]);
+
+  // Calculate coordinates
+  const points = labels.map((label, idx) => {
+    const x = labels.length === 1
+      ? paddingLeft + plotWidth / 2
+      : paddingLeft + (idx / (labels.length - 1)) * plotWidth;
+    const y = height - paddingBottom - (data[idx] / maxVal) * plotHeight;
+    return { x, y, val: data[idx], label };
+  });
+
+  // 2. Gradient Area Fill
+  if (points.length > 1) {
+    const gradient = ctx.createLinearGradient(0, paddingTop, 0, height - paddingBottom);
+    gradient.addColorStop(0, 'rgba(16, 185, 129, 0.25)');
+    gradient.addColorStop(1, 'rgba(16, 185, 129, 0.01)');
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, height - paddingBottom);
+    ctx.lineTo(points[0].x, points[0].y);
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const cpX = (p0.x + p1.x) / 2;
+      ctx.bezierCurveTo(cpX, p0.y, cpX, p1.y, p1.x, p1.y);
+    }
+
+    ctx.lineTo(points[points.length - 1].x, height - paddingBottom);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+
+  // 3. Curved Stroke Line
+  ctx.beginPath();
+  if (points.length === 1) {
+    ctx.arc(points[0].x, points[0].y, 4, 0, 2 * Math.PI);
+  } else {
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const cpX = (p0.x + p1.x) / 2;
+      ctx.bezierCurveTo(cpX, p0.y, cpX, p1.y, p1.x, p1.y);
+    }
+  }
+  ctx.strokeStyle = '#10b981';
+  ctx.lineWidth = 2.75;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // 4. Points & Value Pill Badges
+  points.forEach((p) => {
+    // Outer White Halo
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Value Pill Badge above point
+    ctx.fillStyle = '#065f46';
+    ctx.font = "bold 11px 'Space Grotesk', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText(`${p.val} unit`, p.x, p.y - 8);
+
+    // Date label below X axis
+    ctx.fillStyle = '#5d6f63';
+    ctx.font = "500 11px 'DM Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText(p.label, p.x, height - paddingBottom + 18);
+  });
+}
+
+window.addEventListener('resize', () => {
+  if (cachedStatistik) {
+    renderCharts(cachedStatistik, cachedRiwayat);
+  }
+});
 
 function renderStatistik(statistik) {
   el.statTotal.textContent = statistik.jumlah_tindakan;
@@ -64,46 +310,162 @@ function renderStatistik(statistik) {
   el.statPersen.textContent = `${persen}%`;
 
   renderPerJenis(statistik.per_jenis);
+  renderCharts(statistik, cachedRiwayat);
+}
+
+function formatJenisSaran(jenis) {
+  if (!jenis) return 'Umum';
+  if (jenis.toLowerCase() === 'pemusnahan') return 'Dibuang';
+  return jenis;
 }
 
 function renderPerJenis(perJenis) {
   const entries = Object.entries(perJenis || {});
-  el.perJenisWrap.classList.toggle('hidden', entries.length === 0);
-  el.perJenisChips.innerHTML = entries
-    .map(([jenis, jumlah]) => `<span style="${jenisBadgeStyle(jenis)}">${esc(jenis)} ${jumlah}</span>`)
-    .join('');
+  if (!el.perJenisChips) return;
+  el.perJenisChips.innerHTML = '';
+  if (entries.length === 0) {
+    el.perJenisChips.innerHTML = '<span class="text-xs text-light">Belum ada strategi dieksekusi</span>';
+    return;
+  }
+  entries.forEach(([rawJenis, jumlah]) => {
+    const jenis = formatJenisSaran(rawJenis);
+    const chip = document.createElement('span');
+    chip.textContent = `${jenis}: ${jumlah}`;
+    chip.classList.add('badge', `badge-${jenis.toLowerCase().replace(/\s+/g, '-')}`);
+    el.perJenisChips.appendChild(chip);
+  });
+}
+
+/**
+ * Kupon kasir bertarget kategori sengaja tidak punya item terkait (item_id
+ * null sejak awal, bukan barang yang dihapus). Tag "(dihapus)" hanya masuk
+ * akal untuk rekomendasi AI (sumber='ai') yang item_id null karena barang
+ * aslinya sudah dihapus dari stok.
+ */
+function isBarangDihapus(r) {
+  return r.sumber !== 'kasir' && !r.item;
+}
+
+function isDariKasir(r) {
+  return r.sumber === 'kasir';
+}
+
+function renderNamaDanBadgeSumber(clone, r, nama, item) {
+  const namaEl = clone.querySelector('.js-nama');
+  if (namaEl) {
+    namaEl.textContent = nama;
+    if (isBarangDihapus(r)) {
+      const deletedTag = document.createElement('span');
+      deletedTag.className = 'ml-1.5 text-[11px] text-soft font-normal italic';
+      deletedTag.textContent = '(dihapus)';
+      namaEl.appendChild(deletedTag);
+    }
+  }
+}
+
+function renderJenisBadge(clone, r) {
+  const badge = clone.querySelector('.js-jenis-badge');
+  const jenis = formatJenisSaran(r.jenis_saran);
+  badge.textContent = jenis;
+  badge.classList.add('badge', `badge-${jenis.toLowerCase().replace(/\s+/g, '-')}`);
+
+  if (isDariKasir(r)) {
+    const sumberBadge = document.createElement('span');
+    sumberBadge.textContent = 'Kasir';
+    sumberBadge.className = 'badge badge-default ml-1';
+    badge.insertAdjacentElement('afterend', sumberBadge);
+  }
+}
+
+/**
+ * Sejajar dengan "Kategori: ..." untuk rekomendasi AI: entri kasir tidak
+ * punya kategori yang berguna untuk dibedakan (dua klaim kupon kategori
+ * yang sama akan identik), jadi slot ini menampilkan kode kupon supaya
+ * tiap baris klaim bisa dibedakan satu sama lain.
+ */
+function renderKategoriAtauKode(clone, r, kategori) {
+  const katEl = clone.querySelector('.js-kategori');
+  if (!katEl) return;
+
+  if (isDariKasir(r) && r.kode_voucher) {
+    katEl.textContent = `Kode: ${r.kode_voucher}`;
+    katEl.classList.remove('hidden');
+  } else if (kategori) {
+    katEl.textContent = `Kategori: ${kategori}`;
+    katEl.classList.remove('hidden');
+  } else {
+    katEl.classList.add('hidden');
+  }
+}
+
+function renderStokDitindak(clone, r, item) {
+  const stokEl = clone.querySelector('.js-stok');
+  if (isDariKasir(r)) {
+    // Klaim kupon tidak mencatat kuantitas transaksi (lihat Opsi C) --
+    // tampilkan tanda hubung, bukan "0 unit" yang terlihat seperti bug.
+    stokEl.textContent = '–';
+  } else {
+    const stok = Number(r.jumlah_stok_saat_dibuat ?? item?.jumlah_stok ?? 0);
+    stokEl.textContent = `${stok} unit`;
+  }
 }
 
 function renderRiwayatRow(r) {
   const item = r.item;
-  const row = document.createElement('div');
-  row.className = 'grid grid-cols-[1.1fr_2fr_1.1fr_1fr_1.4fr] gap-3 px-[18px] py-3.5 border-b border-[#f1f4f0] items-center';
-  row.innerHTML = `
-    <div class="text-[13px] text-[#5d6f63]">${esc(formatTanggalWaktu(r.diterapkan_at))}</div>
-    <div class="text-sm font-medium text-[#132018] truncate">${esc(item?.nama ?? '(barang dihapus)')}</div>
-    <div><span style="${jenisBadgeStyle(r.jenis_saran)}">${esc(r.jenis_saran)}</span></div>
-    <div class="text-[13.5px] font-medium font-heading">${item ? item.jumlah_stok : '–'}</div>
-    <div class="text-[13px] text-[#7d8f83] truncate" title="${esc(r.isi_saran)}">${esc(r.isi_saran)}</div>
-  `;
-  return row;
+  const nama = r.nama_barang || r.nama_item || item?.nama || '(barang dihapus)';
+  const kategori = r.kategori_barang || r.kategori_item || item?.kategori || '';
+  const template = document.getElementById('tmpl-riwayat-row');
+  const clone = template.content.cloneNode(true);
+
+  clone.querySelector('.js-tanggal').textContent = formatTanggalWaktu(r.diterapkan_at);
+
+  renderNamaDanBadgeSumber(clone, r, nama, item);
+  renderKategoriAtauKode(clone, r, kategori);
+
+  renderJenisBadge(clone, r);
+  renderStokDitindak(clone, r, item);
+
+  return clone;
 }
 
 function renderRiwayatCard(r) {
   const item = r.item;
-  const card = document.createElement('article');
-  card.className = 'bg-white border border-[#eef2ed] rounded-[14px] p-4';
-  card.innerHTML = `
-    <div class="flex items-start justify-between gap-2.5">
-      <div class="min-w-0">
-        <div class="text-[15px] font-semibold tracking-tight text-[#132018]">${esc(item?.nama ?? '(barang dihapus)')}</div>
-        <div class="text-[12.5px] text-[#93a398] mt-1">${esc(formatTanggalWaktu(r.diterapkan_at))}</div>
-      </div>
-      <span style="${jenisBadgeStyle(r.jenis_saran)}">${esc(r.jenis_saran)}</span>
-    </div>
-    <p class="text-[13px] text-[#6b7c71] leading-relaxed mt-3">${esc(r.isi_saran)}</p>
-    ${item ? `<div class="text-[12.5px] text-[#93a398] mt-3 pt-3 border-t border-[#eef2ed]">Stok saat ini: <span class="font-medium text-[#3c4d42]">${item.jumlah_stok}</span></div>` : ''}
-  `;
-  return card;
+  const nama = r.nama_barang || r.nama_item || item?.nama || '(barang dihapus)';
+  const kategori = r.kategori_barang || r.kategori_item || item?.kategori || '';
+  const template = document.getElementById('tmpl-riwayat-card');
+  const clone = template.content.cloneNode(true);
+
+  renderNamaDanBadgeSumber(clone, r, nama, item);
+  renderKategoriAtauKode(clone, r, kategori);
+
+  clone.querySelector('.js-tanggal').textContent = formatTanggalWaktu(r.diterapkan_at);
+
+  renderJenisBadge(clone, r);
+  renderStokDitindak(clone, r, item);
+
+  return clone;
+}
+
+function applyRiwayatFilters() {
+  let filtered = [...cachedRiwayat];
+
+  if (searchKeyword.trim()) {
+    const q = searchKeyword.trim().toLowerCase();
+    filtered = filtered.filter((r) => {
+      const nama = (r.nama_barang || r.nama_item || r.item?.nama || '').toLowerCase();
+      const kat = (r.kategori_barang || r.kategori_item || r.item?.kategori || '').toLowerCase();
+      const jenis = (r.jenis_saran || '').toLowerCase();
+      return nama.includes(q) || kat.includes(q) || jenis.includes(q);
+    });
+  }
+
+  if (activeDampakFilter === 'selamat') {
+    filtered = filtered.filter((r) => JENIS_TERSELAMATKAN.includes(r.jenis_saran));
+  } else if (activeDampakFilter === 'buang') {
+    filtered = filtered.filter((r) => !JENIS_TERSELAMATKAN.includes(r.jenis_saran));
+  }
+
+  renderRiwayat(filtered);
 }
 
 function renderRiwayat(daftar) {
@@ -122,6 +484,25 @@ function renderRiwayat(daftar) {
   el.cards.appendChild(cardFragment);
 }
 
+if (el.riwayatSearch) {
+  el.riwayatSearch.addEventListener('input', (e) => {
+    searchKeyword = e.target.value;
+    applyRiwayatFilters();
+  });
+}
+
+if (el.riwayatFilterTabs) {
+  el.riwayatFilterTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dampak]');
+    if (!btn) return;
+    activeDampakFilter = btn.dataset.dampak;
+    el.riwayatFilterTabs.querySelectorAll('[data-dampak]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.dampak === activeDampakFilter);
+    });
+    applyRiwayatFilters();
+  });
+}
+
 el.btnLogout.addEventListener('click', async () => {
   el.btnLogout.disabled = true;
   await logout();
@@ -129,21 +510,46 @@ el.btnLogout.addEventListener('click', async () => {
 });
 
 async function init() {
-  el.loading.classList.remove('hidden');
-  el.error.classList.add('hidden');
-  el.container.classList.add('hidden');
-  el.empty.classList.add('hidden');
+  if (el.loading) el.loading.classList.remove('hidden');
+  if (el.error) el.error.classList.add('hidden');
+  if (el.container) el.container.classList.add('hidden');
+  if (el.empty) el.empty.classList.add('hidden');
 
   try {
-    const [me, riwayat, statistik] = await Promise.all([fetchMe(), fetchRiwayat(), fetchStatistikRiwayat()]);
-    el.userName.textContent = me.name;
-    renderStatistik(statistik);
-    renderRiwayat(riwayat);
+    const [me, riwayat, statistik] = await Promise.all([
+      fetchMe().catch(() => ({ name: 'Admin Koperasi' })),
+      fetchRiwayat().catch((e) => {
+        console.error('fetchRiwayat error:', e);
+        return [];
+      }),
+      fetchStatistikRiwayat().catch((e) => {
+        console.error('fetchStatistikRiwayat error:', e);
+        return {
+          jumlah_tindakan: 0,
+          jumlah_terselamatkan: 0,
+          jumlah_terbuang: 0,
+          unit_terselamatkan: 0,
+          unit_terbuang: 0,
+          per_jenis: {},
+        };
+      }),
+    ]);
+
+    cachedRiwayat = riwayat || [];
+    if (me) {
+      if (me.name) currentUserName = me.name;
+      if (el.userName) el.userName.textContent = me.name;
+    }
+    if (statistik) renderStatistik(statistik);
+    applyRiwayatFilters();
   } catch (err) {
-    el.error.textContent = err.message || 'Terjadi kesalahan saat memuat riwayat.';
-    el.error.classList.remove('hidden');
+    console.error('init error:', err);
+    if (el.error) {
+      el.error.textContent = err.message || 'Terjadi kesalahan saat memuat riwayat.';
+      el.error.classList.remove('hidden');
+    }
   } finally {
-    el.loading.classList.add('hidden');
+    if (el.loading) el.loading.classList.add('hidden');
   }
 }
 

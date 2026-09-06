@@ -4,6 +4,70 @@ Sistem manajemen stok pangan untuk koperasi/UMKM dengan fitur AI Expiry &
 Spoilage Predictor. Dibuat untuk Trunodjoyo Creative Competition (TCC) 2026,
 cabang Vibe Code.
 
+## Coba langsung
+
+| | |
+|---|---|
+| **Aplikasi (frontend)** | https://stok-pangan-cerdas.vercel.app |
+| **API (backend)** | https://stok-pangan-cerdas-production-1606.up.railway.app/api |
+| **Repositori** | https://github.com/HammamFais/Stok-Pangan-Cerdas |
+
+**Akun admin demo:**
+
+```
+Email    : admin@koperasipangan.id
+Password : admin123
+```
+
+Seluruh halaman berada di balik login — tidak ada endpoint API yang bisa
+diakses tanpa token, kecuali `/api/login` itu sendiri.
+
+> **Catatan tentang fitur AI:** rekomendasi AI memakai Gemini API tingkat
+> gratis, dengan kuota gabungan sekitar 80 permintaan per hari (lihat
+> [Rantai fallback model](#rantai-fallback-model--ketahanan-terhadap-keterbatasan-kuota)).
+> Kalau muncul pesan *"Kuota harian layanan AI sudah habis"*, itu perilaku
+> yang memang dirancang — bukan kerusakan — dan kuotanya pulih keesokan
+> harinya. Fitur lain (CRUD, filter, riwayat, statistik) tetap berjalan
+> normal tanpa bergantung pada kuota tersebut.
+
+## Identitas peserta
+
+| | |
+|---|---|
+| **Kompetisi** | Trunodjoyo Creative Competition (TCC) 2026 |
+| **Cabang lomba** | Vibe Code |
+| **Sub tema** | Web Application Development |
+| **Kategori** | Tim |
+| **Ketua tim** | Gusthi Pangestu (3124600098) |
+| **Anggota** | Hammam Hidayatullah (3124600096) |
+| **Asal instansi** | Politeknik Elektronika Negeri Surabaya (PENS) |
+| **Judul karya** | Stok Pangan Cerdas |
+
+## Daftar isi
+
+- [Coba langsung](#coba-langsung)
+- [Identitas peserta](#identitas-peserta)
+- [Masalah yang diselesaikan](#masalah-yang-diselesaikan)
+- [Alur penggunaan aplikasi](#alur-penggunaan-aplikasi)
+- [Arsitektur](#arsitektur)
+  - [Teknologi & versi](#teknologi--versi)
+  - [Struktur folder](#struktur-folder)
+- [Deteksi risiko rule-based](#deteksi-risiko-rule-based)
+- [AI generatif](#ai-generatif)
+  - [Rantai fallback model & ketahanan terhadap keterbatasan kuota](#rantai-fallback-model--ketahanan-terhadap-keterbatasan-kuota)
+  - [Bagian mana rule-based, bagian mana AI generatif](#bagian-mana-rule-based-bagian-mana-ai-generatif)
+  - [Prompt utama AI Insight Panel](#prompt-utama-ai-insight-panel)
+  - [Kenapa pakai Structured Output](#kenapa-pakai-structured-output-responseschema-bukan-parsing-teks-bebas)
+- [Sistem kupon & validasi kasir](#sistem-kupon--validasi-kasir)
+- [Perhitungan skalabilitas](#perhitungan-skalabilitas)
+- [Menjalankan project (lokal)](#menjalankan-project-lokal)
+- [Kredensial admin demo](#kredensial-admin-demo)
+- [Daftar endpoint API](#daftar-endpoint-api)
+- [Struktur fitur per fase](#struktur-fitur-per-fase)
+- [Batasan yang diketahui](#batasan-yang-diketahui)
+- [Tentang folder `design-reference/`](#tentang-folder-design-reference)
+- [Catatan keamanan](#catatan-keamanan)
+
 ## Masalah yang diselesaikan
 
 Koperasi dan UMKM pangan skala kecil-menengah sering merugi karena barang
@@ -38,13 +102,26 @@ mulai berisiko.
    dan menampilkan rekomendasi tindakan (Diskon/Distribusi/Bundling, atau
    Pemusnahan khusus barang yang sudah lewat kadaluarsa) di AI Insight
    Panel, lengkap dengan alasannya dalam Bahasa Indonesia.
-5. **Setelah tindakan itu benar-benar dijalankan di gudang**, admin
-   menekan "Tandai Diterapkan" pada rekomendasi tersebut.
-6. **Admin membuka halaman Riwayat** (`riwayat.html`) untuk melihat rekap:
+5. **Untuk rekomendasi berjenis Diskon**, admin bisa menekan "Print Kupon".
+   Sistem membuka modal yang sudah terisi otomatis dari saran AI: besaran
+   diskon mengikuti yang disarankan, masa berlaku mengikuti tanggal
+   kadaluarsa barang, dan jumlah kupon dibatasi tidak melebihi stok. Setiap
+   lembar yang dicetak mendapat kode unik sendiri beserta barcode Code-39
+   yang benar-benar bisa dipindai.
+6. **Pembeli membawa kupon ke kasir.** Kasir membuka "Cek Kupon Kasir",
+   memindai barcode dengan kamera atau mengetik kodenya, lalu menekan
+   Validasi. Backend memeriksa berurutan: kode ada, status aktif, belum
+   lewat masa berlaku, kuota masih tersisa, dan minimal belanja terpenuhi.
+   Kupon yang lolos bisa diklaim — sekali pakai, tidak bisa diulang.
+7. **Setelah tindakan itu benar-benar dijalankan di gudang**, admin
+   menekan "Tandai Diterapkan" pada rekomendasi tersebut. Mencetak label
+   rak atau kupon juga otomatis menandainya.
+8. **Admin membuka halaman Riwayat** (`riwayat.html`) untuk melihat rekap:
    berapa banyak tindakan yang sudah diambil, berapa unit barang yang
-   berhasil diselamatkan versus yang terpaksa dimusnahkan, dan daftar
-   lengkap setiap tindakan beserta waktunya.
-7. **Admin logout** kapan saja lewat tombol "Keluar" di header, yang
+   berhasil diselamatkan versus yang terpaksa dibuang, dan daftar lengkap
+   setiap tindakan beserta waktunya. Klaim kupon di kasir ikut tercatat di
+   sini, ditandai badge "Kasir" beserta kode kuponnya.
+9. **Admin logout** kapan saja lewat tombol "Keluar" di header, yang
    mencabut token aktif di server.
 
 ## Arsitektur
@@ -128,19 +205,119 @@ berubah, status ikut berubah otomatis tanpa perlu proses tambahan.
 ## AI generatif
 
 - **Provider:** Google Gemini API.
-- **Model yang dikonfigurasi:** alias `gemini-flash-latest` (lihat
+- **Model utama yang dikonfigurasi:** alias `gemini-flash-latest` (lihat
   `GEMINI_MODEL` di `.env` / `config/services.php`). Alias ini dipakai
   karena API key yang tersedia saat pengembangan tidak memiliki akses ke
   model versi tetap (mis. `gemini-2.5-flash`).
 - **Model konkret yang benar-benar di-resolve** (dicek lewat field
-  `modelVersion` pada respons `generateContent`, per 13 Agustus 2026):
-  **`gemini-3.6-flash`**. Karena ini alias, Google bisa mengubah resolusinya
-  kapan saja tanpa pemberitahuan — cek ulang sebelum presentasi final kalau
-  butuh kepastian model yang sedang aktif.
+  `modelVersion` pada respons `generateContent`, per 14 Agustus 2026):
+  **`gemini-3.7-flash`**. Model ini sudah berubah dua kali selama
+  pengembangan (dari `gemini-3.6-flash` beberapa hari sebelumnya) — bukti
+  nyata bahwa alias ini memang bergerak. Karena ini alias, Google bisa
+  mengubah resolusinya kapan saja tanpa pemberitahuan — cek ulang sebelum
+  presentasi final kalau butuh kepastian model yang sedang aktif.
+- **Rantai model cadangan:** `GEMINI_MODEL_FALLBACKS` di `.env` /
+  `config/services.php`, daftar model dipisah koma yang dicoba
+  **berurutan** hanya saat model sebelumnya kena HTTP 429 (kuota habis).
+  Urutan default: `gemini-3.6-flash` → `gemini-3.5-flash` →
+  `gemini-3.5-flash-lite`. Lihat bagian
+  [Rantai fallback model & ketahanan terhadap keterbatasan kuota](#rantai-fallback-model--ketahanan-terhadap-keterbatasan-kuota)
+  di bawah untuk alasan urutan ini dan cara kerjanya.
 - **Tujuan pemakaian:** AI generatif **hanya** dipakai di satu tempat — AI
   Insight Panel, untuk menghasilkan rekomendasi tindakan (bahasa Indonesia)
   atas barang yang berstatus Berisiko atau Kritis.
 - **Kode:** `backend/app/Services/GeminiInsightService.php`.
+- **Batasan kuota (free tier):** akun Gemini yang dipakai selama
+  pengembangan berada di tingkat gratis, dengan batas **20 permintaan
+  `generateContent` per hari per model konkret**. Karena setiap model
+  dalam rantai (model utama + 3 cadangan) adalah model konkret yang
+  berbeda, total kuota gabungan yang tersedia untuk fitur AI Insight
+  adalah **sekitar 80 permintaan per hari**, bukan 20. Kuota ini dibagi
+  bersama oleh semua orang yang memakai key yang sama — admin yang login,
+  siapa pun yang mencoba aplikasi, dan juri saat menilai, semuanya menarik
+  dari kuota harian yang sama. Kuota harian pulih otomatis keesokan
+  harinya (waktu Pasifik, sesuai zona waktu Google), bukan setelah jeda
+  beberapa menit. Untuk deployment produksi jangka panjang, ini perlu
+  di-upgrade ke tingkat berbayar Gemini API atau diberi kuota yang lebih
+  besar.
+
+### Rantai fallback model & ketahanan terhadap keterbatasan kuota
+
+Karena kuota free tier Gemini terpisah per model, `GeminiInsightService`
+mencoba **rantai model secara berurutan** supaya satu model kehabisan
+kuota tidak langsung mematikan fitur AI Insight:
+
+1. **Permintaan pertama** selalu ke model utama (`GEMINI_MODEL`,
+   `gemini-flash-latest`).
+2. **Kalau model itu membalas 429** (kuota habis), aplikasi **langsung**
+   (tanpa jeda tambahan, karena 429 memang tidak di-retry — lihat tabel
+   di bawah) mencoba model berikutnya dalam `GEMINI_MODEL_FALLBACKS`.
+3. **Proses ini berulang** sampai salah satu model berhasil, atau seluruh
+   rantai habis dicoba.
+4. **Kalau semua model dalam rantai membalas 429**, barulah aplikasi
+   menyerah dan menampilkan pesan kuota habis ke user.
+
+**Kenapa urutan rantainya seperti ini** (`gemini-3.6-flash` →
+`gemini-3.5-flash` → `gemini-3.5-flash-lite`): diuji langsung dengan
+prompt yang sama persis untuk barang Tomat Segar (8 unit, sisa 1 hari).
+`gemini-3.6-flash` dan `gemini-3.5-flash` sama-sama menghasilkan
+rekomendasi yang spesifik dan memakai data barang (menyebut "8 unit
+Tomat Segar", tanggal kadaluarsa). `gemini-3.5-flash-lite` menghasilkan
+rekomendasi yang lebih generik (cuma menyebut "tomat" tanpa jumlah unit,
+dan sesekali agak rancu antara `jenis_saran` dan isi sarannya) — tetap
+masuk akal dan berbahasa Indonesia yang benar, tapi kualitasnya di bawah
+dua model sebelumnya. Karena itu model dengan kualitas terbaik selalu
+dicoba lebih dulu, dan model paling sederhana jadi upaya terakhir sebelum
+benar-benar menampilkan pesan kuota habis — lebih baik rekomendasi yang
+agak generik daripada tidak ada rekomendasi sama sekali.
+
+**Kenapa `gemini-flash-lite-latest` dan `gemini-3.1-flash-lite` sengaja
+TIDAK dimasukkan ke rantai:** `gemini-flash-lite-latest` ternyata adalah
+**alias yang resolve ke model konkret yang sama** dengan
+`gemini-3.5-flash-lite` yang sudah ada di rantai — karena kuota dihitung
+per model konkret (bukan per nama/alias yang dipakai memanggilnya),
+memasukkan keduanya tidak menambah kuota sama sekali, cuma alias ganda
+untuk kuota yang sama. `gemini-3.1-flash-lite` adalah generasi lebih lama
+yang kualitas outputnya diperkirakan di bawah `gemini-3.5-flash-lite`,
+jadi tidak menambah nilai sebagai upaya terakhir dalam rantai.
+
+Strategi retry dan fallback ini sengaja dipisah berdasarkan jenis
+kegagalan, karena masing-masing butuh respons yang berbeda:
+
+| Status | Perlakuan | Alasan |
+|---|---|---|
+| 500, 503, kegagalan koneksi | Retry ke **model yang sama**, maksimal 3 percobaan, jeda 1 detik lalu 2 detik | Biasanya gangguan sementara di sisi Google yang pulih sendiri dalam hitungan detik |
+| 429 (kuota habis) | **Tidak** di-retry di model yang sama; langsung dicoba ke **model berikutnya dalam rantai** | Kalau yang habis adalah kuota harian, menunggu beberapa detik tidak menolong — kuota baru pulih besok. Tapi model lain punya kuota terpisah, jadi ada peluang nyata untuk berhasil |
+| 400, 401, 403, 404 | Gagal cepat, tidak ada retry maupun fallback | Masalah permintaan atau kredensial yang tidak akan berubah walau modelnya diganti |
+
+Rantai model dibersihkan dari duplikat sebelum dicoba (`array_unique`) —
+kalau model utama juga tercantum di `GEMINI_MODEL_FALLBACKS`, atau ada
+nama model yang berulang di daftar cadangan, model itu hanya dicoba
+sekali. Nilai kosong akibat koma berlebih di `.env` juga dilewati.
+
+Setiap kali rantai berpindah model, tercatat `Log::warning()` dengan
+`item_id`, model yang gagal, dan model berikutnya yang dicoba — supaya
+bisa dipantau seberapa sering tiap model kehabisan kuota di pemakaian
+nyata.
+
+**Perkiraan waktu tunggu terburuk:** kalau seluruh rantai (4 model) kena
+429 secara berurutan, itu tidak menambah waktu berarti karena 429 tidak
+pernah di-retry — murni 4 kali panggilan cepat. Kasus yang benar-benar
+paling lambat adalah kombinasi: beberapa model di awal rantai kena 429
+(cepat), lalu satu model mengalami gangguan 503 dan menghabiskan seluruh
+jatah retry-nya (3 percobaan × timeout 12 detik + jeda 1s+2s = maksimal
+~39 detik) sebelum akhirnya berhasil atau gagal total di model itu.
+Skenario ekstrem teoretis (3 model kena 429 dengan request lambat,
+ditambah 1 model kena 503 penuh) bisa mendekati ~75 detik, meski ini
+sangat tidak mungkin terjadi dalam praktik karena 429 biasanya dibalas
+instan oleh Google, bukan mendekati batas timeout.
+
+Ini bagian dari jawaban untuk pertanyaan skalabilitas/ketahanan: aplikasi
+tidak bergantung pada satu titik kegagalan Gemini API, atau bahkan satu
+model. Gangguan sementara ditangani lewat retry ke model yang sama, dan
+keterbatasan kuota free tier ditangani lewat rantai fallback ke model
+lain dengan kuota terpisah — dua mekanisme berbeda untuk dua jenis
+masalah yang berbeda pula.
 
 ### Bagian mana rule-based, bagian mana AI generatif
 
@@ -192,6 +369,95 @@ satu dari nilai yang diizinkan, `isi_saran` harus string). Hasilnya:
   dipaksakan di level skema, bukan cuma diharapkan lewat instruksi bahasa
   alami di prompt.
 
+## Sistem kupon & validasi kasir
+
+Rekomendasi AI hanya berguna kalau benar-benar dijalankan. Bagian ini
+menutup jarak antara *saran* dan *transaksi nyata*: setiap saran berjenis
+Diskon bisa diterbitkan menjadi kupon fisik ber-barcode yang ditukarkan
+pembeli di kasir.
+
+### Kenapa kupon, bukan sekadar label diskon
+
+Aplikasi punya dua jenis cetakan, dan keduanya berbeda peran:
+
+| | Label Rak | Kupon |
+|---|---|---|
+| Ditempel di | Rak barang | Dibawa pembeli |
+| Barcode | Tidak ada | Code-39, bisa dipindai |
+| Tersimpan di database | Tidak | Ya, tabel `vouchers` |
+| Bisa divalidasi kasir | Tidak | Ya |
+| Sekali pakai | Tidak | Ya, kuota berkurang tiap klaim |
+
+Label rak hanya menyampaikan informasi. Kupon punya **status** — belum
+dipakai, sudah dipakai, kadaluarsa — sehingga bisa diaudit dan tidak bisa
+digandakan.
+
+### Barcode Code-39 tanpa library eksternal
+
+Barcode digambar sebagai SVG murni memakai tabel encoding Code-39 lengkap
+(43 karakter: `0-9`, `A-Z`, `-`, dan karakter start/stop `*`). Tidak ada
+library barcode yang di-*bundle* — konsisten dengan keputusan arsitektur
+"Vanilla JS tanpa framework". Hasilnya barcode standar yang terbaca
+pemindai USB maupun kamera ponsel, bukan garis hiasan CSS.
+
+### Kode kupon dibuat di backend, bukan browser
+
+Setiap kupon mendapat kode unik berformat `VCHR-{3 huruf nama barang}-{5
+digit}`, misalnya `VCHR-KEJ-88219`. Kode dibuat **di backend** dan dijamin
+unik lewat dua lapis pemeriksaan: terhadap seluruh isi tabel `vouchers`,
+dan terhadap kode-kode lain dalam satu batch pencetakan yang sama.
+
+Mencetak 6 kupon menghasilkan 6 kode berbeda, dibungkus satu transaksi
+database sehingga tidak ada kupon setengah jadi kalau proses gagal di
+tengah. Batas maksimal 50 kupon per permintaan.
+
+### Validasi berlapis, backend sebagai satu-satunya otoritas
+
+Endpoint validasi memeriksa berurutan dan mengembalikan pesan spesifik
+untuk tiap kegagalan:
+
+1. Kode ada di database
+2. Status masih `aktif` (bukan `habis`)
+3. Belum lewat `berlaku_sampai`
+4. Kuota masih tersisa (`terpakai < kuota`)
+5. Total belanja memenuhi `min_belanja`
+
+Endpoint klaim **memeriksa ulang seluruh pemeriksaan yang sama** sebelum
+menaikkan `terpakai`. Frontend tidak pernah dipercaya: memanggil endpoint
+klaim langsung lewat `curl` tanpa melewati validasi tetap ditolak.
+
+Frontend juga tidak menghitung ulang syarat kupon secara mandiri — saat
+nominal belanja diubah, hasil validasi lama justru dihapus dan kasir wajib
+menekan Validasi lagi. Ini mencegah dua sumber kebenaran yang bisa
+berbeda rumus.
+
+### Jejak ke rekomendasi AI
+
+Kupon yang lahir dari kartu AI Insight menyimpan `item_id` dan
+`rekomendasi_id`, sehingga setiap kupon bisa ditelusuri berasal dari saran
+AI yang mana. Kolom `nama_item` dan `kategori_item` disimpan sebagai
+*snapshot* agar riwayat tetap terbaca meski barangnya kemudian dihapus.
+
+### Klaim kupon tidak menambah "unit terselamatkan"
+
+Keputusan yang disengaja. Sistem kasir hanya memvalidasi kode — ia tidak
+mencatat berapa unit yang benar-benar dibeli. Mengisi angka apa pun di
+situ berarti mengarang data, jadi kolom `jumlah_stok_saat_dibuat` untuk
+entri klaim kupon sengaja diisi `0`.
+
+Klaim tetap tercatat penuh di Riwayat sebagai *tindakan* (dengan badge
+"Kasir" dan kode kuponnya), tapi tidak menyumbang ke statistik unit. Angka
+yang ditampilkan ke pengguna lebih baik kecil tapi bisa
+dipertanggungjawabkan daripada besar tapi berbasis asumsi.
+
+### Pemindaian kamera dengan cadangan manual
+
+Halaman kasir memakai `BarcodeDetector` API bila tersedia. API ini masih
+eksperimental dan belum didukung Chrome desktop di Windows, jadi input
+manual **selalu tersedia** sebagai jaring pengaman — bukan sebagai
+alternatif kelas dua. Kalau kamera tidak didukung, muncul pesan jelas
+alih-alih layar hitam tanpa keterangan.
+
 ## Perhitungan skalabilitas
 
 - **Deteksi risiko tanpa job terjadwal.** Status Aman/Berisiko/Kritis
@@ -215,6 +481,19 @@ satu dari nilai yang diizinkan, `isi_saran` harus string). Hasilnya:
   barang di masa sekarang — riwayat tetap akurat walau data barangnya terus
   berubah, bahkan kalau barangnya sudah dihapus sekalipun (kolom `item_id`
   di tabel rekomendasi memakai `nullOnDelete`, bukan `cascadeOnDelete`).
+- **Retry otomatis untuk gangguan sementara, dan rantai fallback model
+  untuk keterbatasan kuota — dua mekanisme berbeda untuk dua jenis
+  kegagalan.** Panggilan ke Gemini API memakai `Http::retry()` —
+  mengulang otomatis (maksimal 3 kali percobaan, jeda 1 detik lalu 2
+  detik) ke model yang sama khusus untuk status 500/503 dan kegagalan
+  koneksi, karena kegagalan semacam itu biasanya sementara. Status 429
+  (kuota habis) sengaja **tidak** diulang di model yang sama — kuota
+  harian baru pulih besok, bukan dalam hitungan detik — tapi karena kuota
+  free tier Gemini ternyata terpisah per model, aplikasi langsung mencoba
+  model berikutnya dalam rantai (total 4 model, ~80 permintaan/hari
+  gabungan) yang kuotanya belum tentu ikut habis. Detail lengkap strategi
+  ini ada di bagian
+  [Rantai fallback model & ketahanan terhadap keterbatasan kuota](#rantai-fallback-model--ketahanan-terhadap-keterbatasan-kuota).
 
 Catatan mengenai skema data: satu barang boleh punya lebih dari satu
 riwayat tindakan seiring waktu (misalnya sebagian stoknya didiskon lebih
@@ -232,9 +511,19 @@ cp .env.example .env
 php artisan key:generate
 ```
 
-Isi kredensial database PostgreSQL di `.env` (`DB_DATABASE`, `DB_USERNAME`,
-`DB_PASSWORD`), lalu isi `GEMINI_API_KEY` (lihat bagian [AI generatif](#ai-generatif)
-di atas).
+**Sebelum lanjut, pastikan PostgreSQL sudah terpasang dan sebuah database
+kosong bernama `stok_pangan_cerdas` sudah dibuat** (lewat pgAdmin atau
+`createdb stok_pangan_cerdas`). Laravel tidak membuatkan database itu
+sendiri — hanya mengisi tabel di dalamnya.
+
+`.env.example` sudah berisi kerangka koneksi PostgreSQL yang benar
+(`DB_CONNECTION=pgsql`, dst.). Yang **wajib** kamu sesuaikan sendiri di
+`.env` hanyalah `DB_PASSWORD` (isi dengan password akun PostgreSQL
+lokalmu — defaultnya kosong, ganti kalau instalasimu memberi password),
+dan `GEMINI_API_KEY` (lihat bagian [AI generatif](#ai-generatif) di atas)
+kalau ingin mencoba fitur AI. Kalau nama database, host, atau username
+PostgreSQL lokalmu berbeda dari default, sesuaikan juga
+`DB_DATABASE`/`DB_HOST`/`DB_USERNAME`.
 
 ```bash
 php artisan migrate:fresh --seed
@@ -266,6 +555,18 @@ diakses dari `localhost`/`127.0.0.1`. Untuk deployment produksi, ganti
 placeholder `REPLACE_WITH_RAILWAY_URL` di file itu dengan URL backend Railway
 yang sebenarnya.
 
+### Cache-busting file JS
+
+Semua tag `<script src="assets/js/...">` di `index.html`, `riwayat.html`,
+dan `login.html` memakai query string versi manual, misalnya
+`assets/js/dashboard.js?v=1.0.0`. **Naikkan angka versi ini di semua file
+HTML setiap kali ada perubahan berarti pada file JS terkait** — tanpa itu,
+browser bisa terus menyajikan versi lama dari cache setelah deploy, dan
+perubahan kode terasa "tidak muncul" padahal source-nya sudah benar. Jangan
+pakai nilai yang berubah otomatis tiap muat halaman (seperti timestamp) —
+itu memaksa unduh ulang semua file JS setiap kali, boros dan memperlambat
+aplikasi tanpa perlu.
+
 ## Kredensial admin demo
 
 ```
@@ -279,16 +580,35 @@ itu sendiri.
 
 ## Daftar endpoint API
 
-Semua endpoint diawali `/api`. Kecuali `POST /login`, semua endpoint di
-bawah wajib header `Authorization: Bearer <token>` (login wall penuh).
+Semua endpoint diawali `/api`. Kecuali `POST /login` dan
+`GET /ringkasan-publik`, semua endpoint di bawah wajib header
+`Authorization: Bearer <token>`.
 
-**Auth**
+**Auth & publik**
 
 | Method | Endpoint | Keterangan |
 |---|---|---|
-| POST | `/login` | Login admin, mengembalikan personal access token (Sanctum). Endpoint publik, tidak butuh token. |
+| POST | `/login` | Login admin, mengembalikan personal access token (Sanctum). Endpoint publik. |
 | POST | `/logout` | Mencabut token yang sedang dipakai. |
 | GET | `/me` | Data admin yang sedang login. |
+| GET | `/ringkasan-publik` | Ringkasan anonim untuk kartu "Pantauan Gudang" di halaman login. Endpoint publik dengan permukaan data sengaja dipersempit — lihat catatan di bawah. |
+
+> **Tentang `/ringkasan-publik`.** Endpoint ini dipanggil dari halaman
+> login, saat pengunjung belum punya token. Yang dikembalikan hanya total
+> jumlah barang dan tiga barang sorotan (nama, kategori, jumlah stok, sisa
+> hari, status) — **tanpa** id, harga, tanggal masuk, atau field lain.
+> Ketiga barang dipilih satu per status (Kritis, Berisiko, Aman) supaya
+> sistem tiga warna langsung terbaca, bukan tiga barang paling kritis yang
+> kebetulan semuanya merah.
+
+**Vouchers (kupon kasir)**
+
+| Method | Endpoint | Keterangan |
+|---|---|---|
+| GET | `/vouchers` | Daftar kupon. Mendukung filter `?status=aktif`. |
+| POST | `/vouchers` | Terbitkan kupon. Parameter `jumlah` (maks. 50) mencetak sejumlah kupon berkode unik dalam satu transaksi database. |
+| POST | `/vouchers/validasi` | Periksa satu kode kupon terhadap lima syarat berlapis. Mengembalikan pesan spesifik untuk tiap kegagalan. |
+| POST | `/vouchers/{voucher}/klaim` | Klaim kupon, menaikkan `terpakai`. Memeriksa ulang seluruh validasi di backend — tidak mempercayai frontend. |
 
 **Items**
 
@@ -321,6 +641,46 @@ bawah wajib header `Authorization: Bearer <token>` (login wall penuh).
 - **Fase 2** — CRUD barang, AI Insight Panel.
 - **Fase 3** — Riwayat & statistik barang terselamatkan, autentikasi admin
   (Sanctum token-based).
+- **Pengembangan lanjutan** — Sistem kupon ber-barcode dan halaman validasi
+  kasir, menutup jarak antara rekomendasi AI dan transaksi nyata di gudang.
+  Di luar tuntutan Fase 1–3, dibangun setelah ketiganya selesai.
+
+## Batasan yang diketahui
+
+Batasan berikut disebutkan secara terbuka karena semuanya adalah
+konsekuensi sadar dari keputusan teknis yang diambil, bukan hal yang
+terlewat.
+
+- **Kuota AI terbatas (±80 permintaan/hari).** Gemini API tingkat gratis
+  membatasi 20 permintaan per hari per model. Aplikasi menyiasatinya dengan
+  rantai empat model sehingga total menjadi sekitar 80, tapi tetap ada
+  batasnya. Untuk pemakaian produksi sesungguhnya, ini perlu di-upgrade ke
+  tingkat berbayar. Fitur non-AI tidak terpengaruh sama sekali.
+- **Deployment memakai tingkat gratis.** Backend (Railway) dan database
+  PostgreSQL berjalan di paket percobaan dengan batas kredit dan waktu
+  aktif. Aplikasi bisa berhenti melayani permintaan kalau kredit habis.
+- **Belum ada pengujian otomatis.** Seluruh verifikasi dilakukan manual —
+  lewat pengujian langsung di browser dan pemanggilan endpoint API
+  satu per satu, termasuk simulasi kegagalan Gemini memakai `Http::fake()`
+  untuk membuktikan perilaku retry dan fallback. Menambahkan *feature test*
+  Laravel adalah langkah lanjutan yang wajar untuk project ini.
+- **Satu peran pengguna saja.** Aplikasi dirancang untuk satu admin
+  koperasi. Belum ada pembedaan hak akses antara admin dan kasir — halaman
+  validasi kupon memakai token yang sama dengan dashboard.
+- **Stok tidak berkurang otomatis saat kupon diklaim.** Aplikasi ini
+  sistem manajemen stok, bukan mesin kasir (POS). Halaman kasir hanya
+  memvalidasi kode kupon dan tidak mencatat kuantitas transaksi, jadi
+  jumlah stok dikurangi admin lewat menu Edit Barang setelah stok opname.
+  Konsekuensinya klaim kupon tidak menyumbang ke statistik unit
+  terselamatkan — lihat [Sistem kupon & validasi kasir](#sistem-kupon--validasi-kasir).
+- **`BarcodeDetector` belum didukung semua browser.** Pemindaian kamera di
+  halaman kasir bergantung pada API eksperimental yang tersedia di Chrome
+  Android tapi belum di Chrome desktop Windows. Input kode manual selalu
+  tersedia sebagai cadangan penuh.
+- **Estimasi umur simpan diisi manual.** Angka umur simpan tiap barang
+  dimasukkan admin, bukan diprediksi sistem. Ini keputusan yang disengaja:
+  batasan lomba melarang penggunaan machine learning custom, dan admin
+  koperasi umumnya sudah mengetahui angka ini dari pemasok.
 
 ## Tentang folder `design-reference/`
 

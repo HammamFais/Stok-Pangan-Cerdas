@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Item;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -13,14 +15,27 @@ class GeminiInsightService
 
     private readonly string $model;
 
-    public function __construct(?string $apiKey = null, ?string $model = null)
+    /** @var list<string> */
+    private readonly array $modelFallbacks;
+
+    /**
+     * @param  list<string>|null  $modelFallbacks
+     */
+    public function __construct(?string $apiKey = null, ?string $model = null, ?array $modelFallbacks = null)
     {
         $this->apiKey = $apiKey ?: (string) config('services.gemini.key');
         $this->model = $model ?: (string) config('services.gemini.model');
+        $this->modelFallbacks = $modelFallbacks ?? (array) config('services.gemini.model_fallbacks', []);
     }
 
     /**
      * Minta rekomendasi tindakan dari Gemini untuk satu barang berisiko/kritis.
+     *
+     * Kuota gratis Gemini dibatasi PER MODEL, bukan digabung. Kalau model
+     * utama kena 429 (kuota habis), dicoba berurutan ke rantai model
+     * cadangan yang kuotanya masing-masing terpisah — dari kualitas output
+     * paling mendekati model utama ke yang paling sederhana — sebelum
+     * benar-benar menyerah dan memberi tahu user bahwa kuota habis.
      *
      * @return array{jenis_saran: string, isi_saran: string}
      */
@@ -32,35 +47,118 @@ class GeminiInsightService
             throw new RuntimeException('Layanan AI belum dikonfigurasi. Hubungi pengelola sistem.');
         }
 
+        $cacheKey = 'gemini_insight_' . md5("{$item->nama}_{$item->kategori}_{$item->status}_{$item->sisa_hari}_{$item->jumlah_stok}");
+        $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+        if ($cached && is_array($cached)) {
+            Log::info('GeminiInsightService menggunakan cache persisten (0 token)', ['item_id' => $item->id]);
+            return $cached;
+        }
+
         $sudahKadaluarsa = $item->sisa_hari < 0;
         $prompt = $this->buildPrompt($item, $sudahKadaluarsa);
 
+        // Rantai model yang dicoba untuk kasus 429
+        $rantaiModel = array_values(array_unique([$this->model, ...$this->modelFallbacks]));
+
+        $modelSebelumnya = null;
+        $response = null;
+
+        foreach ($rantaiModel as $model) {
+            if ($modelSebelumnya !== null) {
+                Log::warning('Gemini API kuota habis, berpindah ke model berikutnya dalam rantai', [
+                    'item_id' => $item->id,
+                    'model_gagal' => $modelSebelumnya,
+                    'model_berikutnya' => $model,
+                ]);
+            }
+
+            $response = $this->kirimKeGemini($model, $prompt, $sudahKadaluarsa, $item);
+
+            if ($response->status() !== 429) {
+                break;
+            }
+
+            $modelSebelumnya = $model;
+        }
+
+        $hasil = $this->parseResponse($response, $item, $rantaiModel);
+        \Illuminate\Support\Facades\Cache::put($cacheKey, $hasil, now()->addDays(30));
+
+        return $hasil;
+    }
+
+    private function kirimKeGemini(string $model, string $prompt, bool $sudahKadaluarsa, Item $item)
+    {
         $enumSaran = $sudahKadaluarsa
-            ? ['Pemusnahan']
+            ? ['Dibuang']
             : ['Diskon', 'Distribusi', 'Bundling'];
 
-        $response = Http::timeout(30)
-            ->withHeader('x-goog-api-key', $this->apiKey)
-            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent", [
-                'contents' => [
-                    ['parts' => [['text' => $prompt]]],
-                ],
-                'generationConfig' => [
-                    'temperature' => 0.4,
-                    'responseMimeType' => 'application/json',
-                    'responseSchema' => [
-                        'type' => 'OBJECT',
-                        'properties' => [
-                            'jenis_saran' => [
-                                'type' => 'STRING',
-                                'enum' => $enumSaran,
-                            ],
-                            'isi_saran' => ['type' => 'STRING'],
-                        ],
-                        'required' => ['jenis_saran', 'isi_saran'],
+        $retryableStatusCodes = [500, 503];
+
+        try {
+            return Http::withoutVerifying()
+                ->timeout(25)
+                ->withHeader('x-goog-api-key', $this->apiKey)
+                ->retry([1000, 2000], when: function ($exception, $request) use ($retryableStatusCodes, $item, $model) {
+                    $bolehRetry = $exception instanceof ConnectionException
+                        || ($exception instanceof RequestException
+                            && in_array($exception->response->status(), $retryableStatusCodes, true));
+
+                    if ($bolehRetry) {
+                        Log::warning('Gemini API request gagal, mencoba ulang', [
+                            'item_id' => $item->id,
+                            'model' => $model,
+                            'status' => $exception instanceof RequestException ? $exception->response->status() : 'connection_error',
+                        ]);
+                    }
+
+                    return $bolehRetry;
+                }, throw: false)
+                ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent", [
+                    'contents' => [
+                        ['parts' => [['text' => $prompt]]],
                     ],
-                ],
+                    'generationConfig' => [
+                        'temperature' => 0.3,
+                        'responseMimeType' => 'application/json',
+                        'responseSchema' => [
+                            'type' => 'OBJECT',
+                            'properties' => [
+                                'jenis_saran' => [
+                                    'type' => 'STRING',
+                                    'enum' => $enumSaran,
+                                ],
+                                'isi_saran' => ['type' => 'STRING'],
+                            ],
+                            'required' => ['jenis_saran', 'isi_saran'],
+                        ],
+                    ],
+                ]);
+        } catch (ConnectionException $e) {
+            Log::error('Gemini API tidak dapat dihubungi setelah beberapa percobaan', [
+                'item_id' => $item->id,
+                'model' => $model,
+                'error' => $e->getMessage(),
             ]);
+
+            throw new RuntimeException('Layanan AI sedang tidak dapat dihubungi. Coba lagi beberapa saat.');
+        }
+    }
+
+    /**
+     * @param  list<string>  $rantaiModel
+     */
+    private function parseResponse($response, Item $item, array $rantaiModel = []): array
+    {
+        if ($response->status() === 429) {
+            Log::error('Gemini API kuota habis di semua model yang dicoba', [
+                'item_id' => $item->id,
+                'rantai_model' => $rantaiModel,
+                'body' => $response->body(),
+            ]);
+
+            throw new RuntimeException('Kuota harian layanan AI sudah habis. Fitur rekomendasi akan tersedia kembali besok.');
+        }
 
         if ($response->failed()) {
             Log::error('Gemini API request failed', [
@@ -102,40 +200,14 @@ class GeminiInsightService
 
     private function buildPrompt(Item $item, bool $sudahKadaluarsa): string
     {
-        $statusLabel = match ($item->status) {
-            'kritis' => 'Kritis (akan kadaluarsa dalam 2 hari atau kurang, atau sudah lewat)',
-            'berisiko' => 'Berisiko (akan kadaluarsa dalam 3-5 hari)',
-            default => 'Aman',
-        };
-
-        $instruksiSaran = $sudahKadaluarsa
-            ? <<<INSTRUKSI
-                PENTING — Barang ini SUDAH LEWAT tanggal kadaluarsa (sisa hari negatif). Barang seperti ini TIDAK LAYAK dijual, didiskon, didistribusikan, atau dibundling dengan produk lain karena berisiko terhadap keamanan pangan.
-                Satu-satunya jenis_saran yang boleh kamu berikan adalah "Pemusnahan". Isi_saran harus menginstruksikan pemusnahan/pembuangan barang secara aman sesuai prosedur kebersihan gudang, TANPA menyarankan penjualan dalam bentuk apa pun.
-                INSTRUKSI
-            : <<<INSTRUKSI
-                Pilih SATU jenis saran yang paling tepat: "Diskon", "Distribusi", atau "Bundling".
-                - Diskon: barang dijual dengan potongan harga agar cepat terjual sebelum kadaluarsa.
-                - Distribusi: barang didistribusikan/disumbangkan ke pihak lain (mitra, dapur umum, dsb) sebelum kadaluarsa.
-                - Bundling: barang digabung dengan produk lain menjadi satu paket jual agar lebih menarik dan cepat laku.
-                INSTRUKSI;
+        $aturan = $sudahKadaluarsa
+            ? 'Barang ini telah lewat tanggal kadaluarsa. Rekomendasikan jenis_saran "Dibuang" dengan instruksi pembuangan/pemusnahan yang aman.'
+            : 'Pilih jenis_saran yang paling tepat: "Diskon", "Distribusi", atau "Bundling".';
 
         return <<<PROMPT
-            Kamu adalah asisten AI untuk sistem manajemen stok pangan koperasi/UMKM bernama "Stok Pangan Cerdas".
-            Tugasmu: memberi SATU rekomendasi tindakan konkret dalam Bahasa Indonesia untuk barang berikut.
-
-            Data barang:
-            - Nama: {$item->nama}
-            - Kategori: {$item->kategori}
-            - Jumlah stok: {$item->jumlah_stok} unit
-            - Tanggal masuk: {$item->tanggal_masuk->toDateString()}
-            - Estimasi umur simpan: {$item->estimasi_umur_simpan_hari} hari
-            - Sisa hari sebelum kadaluarsa: {$item->sisa_hari} hari
-            - Status risiko: {$statusLabel}
-
-            {$instruksiSaran}
-
-            Tulis isi_saran sebagai 1-2 kalimat singkat, praktis, dan actionable dalam Bahasa Indonesia — sebutkan jenis barang dan alasan singkat berdasarkan data di atas. Jangan gunakan format markdown.
-            PROMPT;
+Sebagai asisten manajemen stok pangan, berikan 1 rekomendasi singkat (1-2 kalimat) dalam Bahasa Indonesia.
+Data: {$item->nama} ({$item->kategori}), Stok: {$item->jumlah_stok} unit, Sisa masa simpan: {$item->sisa_hari} hari, Status: {$item->status}.
+{$aturan}
+PROMPT;
     }
 }
