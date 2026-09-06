@@ -9,7 +9,8 @@ cabang Vibe Code.
 | | |
 |---|---|
 | **Aplikasi (frontend)** | https://stok-pangan-cerdas.vercel.app |
-| **API (backend)** | https://stok-pangan-cerdas-production-1606.up.railway.app/api |
+| **API (backend)** | https://stok-pangan-cerdas-production-1100.up.railway.app/api |
+| **Dokumentasi API** | https://stok-pangan-cerdas-production-1100.up.railway.app/docs |
 | **Repositori** | https://github.com/HammamFais/Stok-Pangan-Cerdas |
 
 **Akun admin demo:**
@@ -579,6 +580,13 @@ tidak ada endpoint API yang bisa diakses tanpa token, kecuali `/api/login`
 itu sendiri.
 
 ## Daftar endpoint API
+
+Seluruh endpoint di bawah juga terdokumentasi secara interaktif lewat
+**Swagger UI** di [`/docs`](https://stok-pangan-cerdas-production-1100.up.railway.app/docs),
+mengikuti spesifikasi OpenAPI 3.0 (`/api/openapi.json`). Di sana setiap
+endpoint bisa dicoba langsung dari browser — termasuk alur login untuk
+mendapatkan token, lalu memakainya pada endpoint yang butuh autentikasi —
+tanpa perlu Postman atau curl.
 
 Semua endpoint diawali `/api`. Kecuali `POST /login` dan
 `GET /ringkasan-publik`, semua endpoint di bawah wajib header
