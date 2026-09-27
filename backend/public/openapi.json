@@ -11,7 +11,7 @@
   },
   "servers": [
     {
-      "url": "https://stok-pangan-cerdas-production-1100.up.railway.app",
+      "url": "https://stok-pangan-cerdas-production-4ae9.up.railway.app",
       "description": "Production (Railway + PostgreSQL)"
     },
     {

@@ -9,8 +9,8 @@ cabang Vibe Code.
 | | |
 |---|---|
 | **Aplikasi (frontend)** | https://stok-pangan-cerdas.vercel.app |
-| **API (backend)** | https://stok-pangan-cerdas-production-1100.up.railway.app/api |
-| **Dokumentasi API** | https://stok-pangan-cerdas-production-1100.up.railway.app/docs |
+| **API (backend)** | https://stok-pangan-cerdas-production-4ae9.up.railway.app/api |
+| **Dokumentasi API** | https://stok-pangan-cerdas-production-4ae9.up.railway.app/docs |
 | **Repositori** | https://github.com/HammamFais/Stok-Pangan-Cerdas |
 
 **Akun admin demo:**
@@ -582,7 +582,7 @@ itu sendiri.
 ## Daftar endpoint API
 
 Seluruh endpoint di bawah juga terdokumentasi secara interaktif lewat
-**Swagger UI** di [`/docs`](https://stok-pangan-cerdas-production-1100.up.railway.app/docs),
+**Swagger UI** di [`/docs`](https://stok-pangan-cerdas-production-4ae9.up.railway.app/docs),
 mengikuti spesifikasi OpenAPI 3.0 (`/api/openapi.json`). Di sana setiap
 endpoint bisa dicoba langsung dari browser — termasuk alur login untuk
 mendapatkan token, lalu memakainya pada endpoint yang butuh autentikasi —
