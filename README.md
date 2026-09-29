@@ -9,8 +9,8 @@ cabang Vibe Code.
 | | |
 |---|---|
 | **Aplikasi (frontend)** | https://stok-pangan-cerdas.vercel.app |
-| **API (backend)** | https://stok-pangan-cerdas-production-4ae9.up.railway.app/api |
-| **Dokumentasi API** | https://stok-pangan-cerdas-production-4ae9.up.railway.app/docs |
+| **API (backend)** | https://stok-pangan-cerdas-api.vercel.app/api |
+| **Dokumentasi API** | https://stok-pangan-cerdas-api.vercel.app/docs |
 | **Repositori** | https://github.com/HammamFais/Stok-Pangan-Cerdas |
 
 **Akun admin demo:**
@@ -131,10 +131,18 @@ mulai berisiko.
   hanya menyediakan endpoint JSON di bawah `/api`.
 - **Frontend** — Vanilla JS + Tailwind CSS (lewat CDN), file statis terpisah
   yang memanggil backend lewat `fetch()`.
-- **Database** — PostgreSQL.
+- **Database** — PostgreSQL (Neon, region Singapura).
 - **Autentikasi** — Laravel Sanctum, mode *personal access token* (bukan SPA
   cookie/session), karena frontend dan backend adalah dua deployment terpisah
-  yang beda origin (frontend di Vercel, backend di Railway).
+  yang beda origin (`stok-pangan-cerdas.vercel.app` dan
+  `stok-pangan-cerdas-api.vercel.app`).
+- **Deployment backend** — Laravel dijalankan sebagai fungsi serverless di
+  Vercel (runtime `vercel-php`, region `sin1` Singapura, bersebelahan dengan
+  database). Karena fungsi serverless hanya boleh menulis ke `/tmp`,
+  `backend/api/index.php` memindahkan folder storage ke sana sebelum Laravel
+  dijalankan, dan konfigurasinya ada di `backend/vercel.json`. Session
+  disimpan di cookie dan cache di database, supaya tetap konsisten walau tiap
+  request bisa ditangani instance berbeda.
 
 ### Teknologi & versi
 
@@ -552,9 +560,8 @@ python -m http.server 5500
 Buka `http://127.0.0.1:5500/login.html` di browser.
 
 `assets/js/api.js` otomatis mengarah ke `http://127.0.0.1:8000/api` saat
-diakses dari `localhost`/`127.0.0.1`. Untuk deployment produksi, ganti
-placeholder `REPLACE_WITH_RAILWAY_URL` di file itu dengan URL backend Railway
-yang sebenarnya.
+diakses dari `localhost`/`127.0.0.1`, dan ke backend produksi
+(`https://stok-pangan-cerdas-api.vercel.app/api`) saat diakses dari domain lain.
 
 ### Cache-busting file JS
 
@@ -582,7 +589,7 @@ itu sendiri.
 ## Daftar endpoint API
 
 Seluruh endpoint di bawah juga terdokumentasi secara interaktif lewat
-**Swagger UI** di [`/docs`](https://stok-pangan-cerdas-production-4ae9.up.railway.app/docs),
+**Swagger UI** di [`/docs`](https://stok-pangan-cerdas-api.vercel.app/docs),
 mengikuti spesifikasi OpenAPI 3.0 (`/api/openapi.json`). Di sana setiap
 endpoint bisa dicoba langsung dari browser — termasuk alur login untuk
 mendapatkan token, lalu memakainya pada endpoint yang butuh autentikasi —
@@ -664,9 +671,10 @@ terlewat.
   rantai empat model sehingga total menjadi sekitar 80, tapi tetap ada
   batasnya. Untuk pemakaian produksi sesungguhnya, ini perlu di-upgrade ke
   tingkat berbayar. Fitur non-AI tidak terpengaruh sama sekali.
-- **Deployment memakai tingkat gratis.** Backend (Railway) dan database
-  PostgreSQL berjalan di paket percobaan dengan batas kredit dan waktu
-  aktif. Aplikasi bisa berhenti melayani permintaan kalau kredit habis.
+- **Deployment memakai tingkat gratis.** Backend (Vercel) dan database
+  (Neon) berjalan di paket gratis. Keduanya "tidur" saat tidak dipakai,
+  sehingga permintaan pertama setelah lama idle sedikit lebih lambat
+  (sekitar 1–2 detik) sebelum kembali normal.
 - **Belum ada pengujian otomatis.** Seluruh verifikasi dilakukan manual —
   lewat pengujian langsung di browser dan pemanggilan endpoint API
   satu per satu, termasuk simulasi kegagalan Gemini memakai `Http::fake()`
@@ -705,6 +713,6 @@ aplikasi sesungguhnya dibangun dari nol mengikuti arsitektur di
 - `GEMINI_API_KEY` disimpan di `backend/.env` (masuk `.gitignore`, tidak
   pernah dikirim ke frontend). Semua panggilan ke Gemini API lewat backend
   sebagai proxy.
-- Sebelum repo di-*publish* ke GitHub dan sebelum deploy ke Railway,
+- Sebelum repo di-*publish* ke GitHub dan sebelum deploy ke produksi,
   `GEMINI_API_KEY` yang dipakai selama development **harus dirotasi ulang**
   dan diganti key baru khusus produksi.
