@@ -11,8 +11,8 @@
   },
   "servers": [
     {
-      "url": "https://stok-pangan-cerdas-production-4ae9.up.railway.app",
-      "description": "Production (Railway + PostgreSQL)"
+      "url": "https://stok-pangan-cerdas-api.vercel.app",
+      "description": "Production (Vercel Serverless + Neon PostgreSQL)"
     },
     {
       "url": "http://127.0.0.1:8000",
